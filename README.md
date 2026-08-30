@@ -43,12 +43,11 @@ Early. What works today:
 - [x] Flushes on every game save
 - [x] Writes run metadata and outcome
 - [x] Combat action capture (`play_card`, `end_turn`, potions)
-- [x] Route capture (`choose_map_node`, `claim_treasure_relic`)
-- [ ] Remaining UI action capture (events, rest, shop, rewards, Crystal Sphere)
-
-Runs record their combat and their route through the map; event, shop, rest and
-reward decisions are not captured yet, so a trajectory is currently silent
-between rooms.
+- [x] Route capture (`choose_map_node`, `claim_treasure_relic`, `proceed`)
+- [x] Room capture (events including Ancient rooms, rest sites, rewards, relic
+      choices)
+- [ ] Shop purchases, card reward selection, card-selection screens, Crystal
+      Sphere
 
 ## Requirements
 

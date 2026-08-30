@@ -143,15 +143,26 @@ Captured today:
 | `discard_potion` | `slot` |
 | `choose_map_node` | `index` into the state's `next_options` |
 | `claim_treasure_relic` | `index` |
+| `choose_event_option` | `index` into the state's `event.options` |
+| `advance_dialogue` | — (Ancient rooms) |
+| `choose_rest_option` | `index` into the state's `rest_site.options` |
+| `claim_reward` | `index` into the state's `rewards.items` |
+| `skip_card_reward` | — |
+| `select_relic` | `index` |
+| `proceed` | — |
 
 Arguments are derived from the state recorded in the same step — a `card_index`
 indexes that step's `player.hand`, a `target` names an `entity_id` from its
 `battle.enemies`, a map `index` is one of its `map.next_options`. They mean what
 they say relative to the state beside them, not to the game at some other moment.
 
-Events, shops, rewards, card rewards, rest sites and the Crystal Sphere are not
-captured yet: those decisions do not travel through the action queue this hooks,
-so a run currently records its combat and its route, and is silent in between.
+An `index` is omitted when it could not be resolved against the state — the step
+still records what was chosen in `label`, rather than carrying an index that
+would point at the wrong thing.
+
+Still uncaptured: shop purchases, card reward selection (`select_card_reward`),
+the card-selection and bundle screens, in-combat card selection, the Crystal
+Sphere, and `skip_relic_selection`.
 
 Note that card indices shift as cards leave the hand — the same right-to-left
 ordering caveat that applies to the MCP API applies to replaying these steps.
