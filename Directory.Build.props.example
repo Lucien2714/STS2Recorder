@@ -10,9 +10,5 @@
        build.ps1's -GameDir argument. -->
   <PropertyGroup>
     <STS2GameDir>E:\SteamLibrary\steamapps\common\Slay the Spire 2</STS2GameDir>
-
-    <!-- Where scripts/sync-upstream.ps1 and the build's drift check look for
-         the STS2MCP repo. Defaults to a sibling directory. -->
-    <Sts2McpDir>E:\personal\dev\STS2MCP</Sts2McpDir>
   </PropertyGroup>
 </Project>

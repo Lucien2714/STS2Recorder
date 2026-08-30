@@ -8,13 +8,14 @@ using System.Threading.Tasks;
 namespace STS2_MCP;
 
 /// <summary>
-/// Supplies the few members that the vendored STS2MCP partials expect from
-/// <c>McpMod.cs</c>, which this mod deliberately does not vendor (it carries the
-/// HTTP listener and STS2MCP's own <c>[ModInitializer]</c>).
+/// Supplies the few members that the STS2MCP partials in the vendor/STS2MCP
+/// submodule expect from <c>McpMod.cs</c>, which this mod deliberately does not
+/// compile (it carries the HTTP listener and STS2MCP's own
+/// <c>[ModInitializer]</c>).
 ///
 /// This file is the entire seam between STS2Recorder and STS2MCP's source. Keep
-/// it minimal: anything added here is a member the vendored code can start
-/// depending on, which makes future upstream syncs harder.
+/// it minimal: anything added here is a member upstream code can start depending
+/// on, which makes future submodule bumps harder.
 /// </summary>
 public static partial class McpMod
 {
@@ -44,7 +45,7 @@ public static partial class McpMod
     /// a per-frame callback, both of which already run on the main thread - so
     /// the correct implementation here is to run inline.
     ///
-    /// Only vendored code that the recorder never invokes (the profile and
+    /// Only upstream code that the recorder never invokes (the profile and
     /// compendium endpoint handlers) calls this. It exists to satisfy the
     /// compiler, and running inline keeps it correct rather than merely
     /// compiling: a caller on the main thread gets exactly the semantics it
@@ -77,7 +78,7 @@ public static partial class McpMod
     }
 
     /// <summary>
-    /// Bridges to the vendored <c>BuildGameState()</c>, which is private to this
+    /// Bridges to STS2MCP's <c>BuildGameState()</c>, which is private to this
     /// partial class and therefore unreachable from the recorder's own types.
     ///
     /// Must be called on Godot's main thread.

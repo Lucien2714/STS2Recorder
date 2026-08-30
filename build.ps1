@@ -10,10 +10,6 @@
     Path to the Slay the Spire 2 installation directory. Falls back to the
     STS2_GAME_DIR environment variable, then to Directory.Build.props.
 
-.PARAMETER Sts2McpDir
-    Path to the STS2MCP repo, used only for the vendored-source drift check.
-    Falls back to STS2MCP_DIR, then to a sibling directory.
-
 .PARAMETER Configuration
     Build configuration (default: Release).
 
@@ -27,7 +23,6 @@
 [CmdletBinding()]
 param(
     [string]$GameDir,
-    [string]$Sts2McpDir,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [switch]$Install
@@ -72,14 +67,14 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# --- Sanity-check the vendored sources ----------------------------------------
+# --- Sanity-check the STS2MCP submodule ---------------------------------------
 
-if (-not (Test-Path (Join-Path $scriptDir 'vendor/UPSTREAM.json'))) {
+if (-not (Test-Path (Join-Path $scriptDir 'vendor/STS2MCP/McpMod.StateBuilder.cs'))) {
     Write-Host @"
-ERROR: vendor/UPSTREAM.json is missing, so there is nothing to build against.
+ERROR: the STS2MCP submodule at vendor/STS2MCP is not checked out, so the state
+serializer this mod compiles is missing.
 
-Populate the vendored STS2MCP sources first:
-  .\scripts\sync-upstream.ps1 -Source <path to STS2MCP>
+  git submodule update --init --recursive
 "@ -ForegroundColor Red
     exit 1
 }
@@ -95,7 +90,6 @@ Write-Host "Output         : $outDir"
 Write-Host ""
 
 $buildArgs = @($project, '-c', $Configuration, '-o', $outDir, "-p:STS2GameDir=$GameDir")
-if ($Sts2McpDir) { $buildArgs += "-p:Sts2McpDir=$Sts2McpDir" }
 
 dotnet build @buildArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

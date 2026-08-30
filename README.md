@@ -17,15 +17,16 @@ replaying a human run through an agent harness.
 
 ## Relationship to STS2MCP
 
-State serialization is not reimplemented here. The recorder compiles
-[STS2MCP](https://github.com/Lucien2714/STS2MCP)'s `BuildGameState()` verbatim
-from vendored source, so a recorded `state` object is **identical** to what
-STS2MCP's `GET /api/v1/singleplayer` returns, and captured actions use the same
-names and argument shapes as its action API.
+State serialization is not reimplemented here.
+[STS2MCP](https://github.com/Lucien2714/STS2MCP) is a git submodule at
+`vendor/STS2MCP`, and its `BuildGameState()` is compiled straight into this mod,
+so a recorded `state` object is **identical** to what STS2MCP's
+`GET /api/v1/singleplayer` returns, and captured actions use the same names and
+argument shapes as its action API.
 
 Practically, that means a recorded human run and an agent's run through the MCP
 server are the same data format, and every recording is stamped with the exact
-upstream commit that produced it. See [`vendor/README.md`](vendor/README.md).
+submodule commit that produced it. See [`vendor/README.md`](vendor/README.md).
 
 The two mods are independent and can be installed side by side; the recorder
 opens no ports and never enqueues an action.
@@ -48,18 +49,18 @@ but no intermediate steps.
 
 - Slay the Spire 2 installed
 - [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
-- A checkout of [STS2MCP](https://github.com/Lucien2714/STS2MCP) (to vendor from
-  and to drift-check against)
-- PowerShell 7+ for the build and vendor scripts
+- The `vendor/STS2MCP` submodule checked out (see below)
+- PowerShell 7+ for the build script
 
 ## Build
 
 ```powershell
+# One-off: fetch the STS2MCP submodule
+#   (cloning with --recurse-submodules does this for you)
+git submodule update --init --recursive
+
 # One-off: point the build at your game install
 Copy-Item Directory.Build.props.example Directory.Build.props   # then edit
-
-# Populate the vendored STS2MCP sources
-.\scripts\sync-upstream.ps1 -Source E:\path\to\STS2MCP
 
 # Build, and optionally install into <game>\mods\
 .\build.ps1

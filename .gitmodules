@@ -1,0 +1,4 @@
+[submodule "vendor/STS2MCP"]
+	path = vendor/STS2MCP
+	url = https://github.com/Lucien2714/STS2MCP.git
+	branch = feat/custom-run
