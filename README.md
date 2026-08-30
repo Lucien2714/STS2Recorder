@@ -42,11 +42,13 @@ Early. What works today:
       from the main menu without loading the run
 - [x] Flushes on every game save
 - [x] Writes run metadata and outcome
-- [ ] Combat action capture (`play_card`, `end_turn`)
-- [ ] Navigation and UI action capture (map, events, rest, shop, rewards)
+- [x] Combat action capture (`play_card`, `end_turn`, potions)
+- [x] Route capture (`choose_map_node`, `claim_treasure_relic`)
+- [ ] Remaining UI action capture (events, rest, shop, rewards, Crystal Sphere)
 
-Until the capture layer lands, files contain run metadata and a terminal state
-but no intermediate steps.
+Runs record their combat and their route through the map; event, shop, rest and
+reward decisions are not captured yet, so a trajectory is currently silent
+between rooms.
 
 ## Requirements
 

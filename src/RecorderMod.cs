@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -237,12 +238,42 @@ public static class RecorderMod
     /// <summary>
     /// Appends a decision point to the active recording. No-op when no run is
     /// being recorded, so capture hooks can call unconditionally.
+    ///
+    /// The state is snapshotted here, before the action reaches the game, and
+    /// handed to <paramref name="describe"/> so a hook can derive its arguments
+    /// from the very state it is paired with - the played card's position in the
+    /// recorded hand, the target's id as the recorded enemy list spells it. That
+    /// is what makes a step replayable: the arguments mean what they say
+    /// relative to the state beside them.
+    ///
+    /// Returning null from <paramref name="describe"/> records nothing, which is
+    /// how hooks pass on actions that are not a player decision. Building the
+    /// state is not cheap, so it happens only once a session is known to be
+    /// listening.
     /// </summary>
-    internal static void RecordAction(RecordedAction action) => Log.Guard("Record action", () =>
+    internal static void RecordAction(Func<Dictionary<string, object?>?, RecordedAction?> describe) =>
+        Log.Guard("Record action", () =>
+        {
+            if (Session is not { IsClosed: false } session) return;
+
+            var state = RunContext.CaptureState();
+
+            var action = describe(state);
+            if (action == null) return;
+
+            session.RecordStep(state, action);
+        });
+
+    /// <summary>
+    /// Drops the last recorded step if it recorded <paramref name="action"/>,
+    /// for a decision the player took back before it resolved.
+    /// </summary>
+    internal static void RetractAction(string action) => Log.Guard("Retract action", () =>
     {
         if (Session is not { IsClosed: false } session) return;
 
-        session.RecordStep(RunContext.CaptureState(), action);
+        if (session.RetractLastStep(action))
+            Log.Info($"Retracted a recorded {action}; it was taken back before it resolved.");
     });
 
     private static string ResolveAssemblyVersion()

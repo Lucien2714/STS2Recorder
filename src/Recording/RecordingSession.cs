@@ -203,6 +203,30 @@ internal sealed class RecordingSession
     }
 
     /// <summary>
+    /// Removes the last step if it recorded <paramref name="action"/>, for when
+    /// the game reverses a decision before it takes effect. Returns whether
+    /// anything was dropped.
+    ///
+    /// A retracted step is removed rather than annotated because the file is a
+    /// record of what the player did, and they did not do this one. If the
+    /// dropped step carried the resume mark, the mark goes back on the next step
+    /// recorded so it is not lost with it.
+    /// </summary>
+    internal bool RetractLastStep(string action)
+    {
+        if (IsClosed) return false;
+
+        int last = Trajectory.Steps.Count - 1;
+        if (last < 0 || Trajectory.Steps[last].Action?.Action != action) return false;
+
+        if (Trajectory.Steps[last].Resumed == true) _pendingResumeMark = true;
+
+        Trajectory.Steps.RemoveAt(last);
+        _dirty = true;
+        return true;
+    }
+
+    /// <summary>
     /// Notes that the run was resumed from a save. The next recorded step is
     /// marked, and the count surfaces in the file header.
     /// </summary>
