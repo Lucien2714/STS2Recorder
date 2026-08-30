@@ -6,9 +6,26 @@ One file per run, written to `output_dir` as:
 run_<yyyyMMdd>_<HHmmss>_<runId>.json
 ```
 
-`runId` is the run's start time in epoch seconds, taken from the game's own run
-history. It is persisted in the save, so resuming a run reuses the same filename
-rather than starting a second file.
+`runId` is the run's start time in epoch seconds. The game mints it when a run
+begins and stores it in the save, passing it back unchanged on load, so it is
+identical for a run and every continue of it.
+
+It is not readable while a run is in progress — the game publishes it only in the
+save data — so a recording is created under a `pending<timestamp>` id and takes
+its real one from the first save, a second or two in. Nothing reaches disk before
+that, so a file carries a `pending…` id only if its run ended without ever
+saving; `run.start_time` is `0` in exactly that case.
+
+Quitting to the menu and continuing the run later appends to the **same file**:
+the recorder looks a run up by its id when the id resolves, so a run played over
+several sittings is one recording. The `<yyyyMMdd>_<HHmmss>` in the name is when
+the run was *first* recorded and never changes. `resume_count` counts the
+continues, and the first step of each sitting after the first carries
+`resumed: true`.
+
+A sitting starts a separate file only when the existing one cannot honestly be
+continued — it already has an `outcome`, or its steps came from a different
+recorder or STS2MCP build, which the log says at the time.
 
 The file is **rewritten in full** on every flush, never appended to. It is
 therefore always valid JSON: a run cut short by a crash or an alt-F4 still leaves
@@ -36,9 +53,10 @@ a readable file containing everything up to the last save.
 |------------------------|-------|
 | `schema_version`       | Bumped on any breaking change to this document. |
 | `state_builder_commit` | The STS2MCP commit whose `BuildGameState()` produced every `state` below. **Read this before comparing files collected at different times** — it is what makes a dataset spanning a schema change interpretable. |
+| `run_id`               | The run's start time in epoch seconds; see above. Equal to `run.start_time`. |
 | `save_count`           | Number of game saves that flushed this file. |
-| `resume_count`         | Times the run was resumed from a save while being recorded. |
-| `outcome`              | Absent while the run is in progress. |
+| `resume_count`         | Times the run was continued after being quit to the menu. |
+| `outcome`              | Absent while the run is in progress or merely left for the main menu — a save-and-quit is not an ending. Present exactly when the run finished: victory, death, or abandon, including a run abandoned from the main menu without being loaded (its file is reopened and stamped). |
 
 ## `run` — RunMeta
 
@@ -55,9 +73,15 @@ Facts fixed for the life of the run.
 }
 ```
 
-`num_reloads` is the game's own counter, mirrored on each save. A reloaded run
-can replay the same decision point twice; consumers training on this data usually
-want to know that happened.
+Every field here is mirrored off the game's save data, so it is absent until the
+run's first save — the same moment `run_id` resolves. Nothing in the live run
+exposes these: the game builds its run-history record only when a run *ends*, and
+keeps it on a process-wide singleton, so reading it during a run yields either
+nothing or the previous run's character and seed.
+
+`num_reloads` is the game's own counter. A reloaded run can replay the same
+decision point twice; consumers training on this data usually want to know that
+happened.
 
 ## `steps` — TrajectoryStep[]
 
@@ -78,7 +102,7 @@ want to know that happened.
 | Field     | Notes |
 |-----------|-------|
 | `state`   | Verbatim `BuildGameState()` output — byte-identical in shape to STS2MCP's `GET /api/v1/singleplayer`. Captured **before** the action took effect, so it is the state the decision was made *from*, not its result. Null if a snapshot failed; the step is still recorded rather than dropped. |
-| `action`  | Null **only** on the terminal step, which records the final state with nothing following it. |
+| `action`  | Null **only** on the terminal step, which records the final state with nothing following it. That step is written the moment the run *ends*, while the state is still intact, so it holds the position the run ended in — for a death, the combat board as the player died, with `state_type` still `monster` and `hp: 0`, because the game-over screen has not been pushed yet. Read `outcome`, not `state_type`, to tell that a run is over. A run left for the menu has no terminal step. |
 | `resumed` | Present and `true` only on the first step after resuming from a save. Omitted otherwise. |
 
 Branch on `state.state_type` (`combat`, `map`, `event`, `shop`, `card_reward`,

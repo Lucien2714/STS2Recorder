@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -43,8 +44,10 @@ internal sealed class TrajectoryWriter
     /// <summary>
     /// Builds the filename for a run: <c>run_20260829_204512_1756500312.json</c>.
     ///
-    /// Fixed at run start and reused for every subsequent flush, so resuming a
-    /// run appends to its original file instead of starting a new one.
+    /// The date and time are when recording began; the suffix is the run's own
+    /// id. It is rebuilt once, when the session adopts its real id at the first
+    /// save, and fixed for every flush after that - so a run is written to one
+    /// file, and its name carries the id that identifies the run across saves.
     /// </summary>
     internal static string BuildFileName(DateTime startedAtUtc, string runId)
     {
@@ -54,9 +57,9 @@ internal sealed class TrajectoryWriter
     }
 
     /// <summary>
-    /// Strips anything that cannot appear in a filename. Run ids come from the
-    /// game (a numeric RunHistory.Id), but this must not be the thing that
-    /// throws if that ever changes shape.
+    /// Strips anything that cannot appear in a filename. Run ids are the game's
+    /// own epoch-seconds start time, but this must not be the thing that throws
+    /// if that ever changes shape.
     /// </summary>
     private static string Sanitize(string value)
     {
@@ -66,6 +69,56 @@ internal sealed class TrajectoryWriter
         foreach (char c in value)
             sb.Append(char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_');
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Finds the recording already on disk for <paramref name="runId"/>, or null
+    /// if there is none.
+    ///
+    /// Runs are looked up by id rather than by filename because the timestamp in
+    /// the name belongs to the sitting that started the recording, not to the
+    /// run. This is what lets a run picked back up days later be appended to its
+    /// own file instead of starting a second one.
+    /// </summary>
+    internal string? FindExisting(string runId)
+    {
+        try
+        {
+            if (!Directory.Exists(_config.OutputDir)) return null;
+
+            var matches = Directory.GetFiles(_config.OutputDir, $"run_*_{Sanitize(runId)}.json");
+
+            // More than one can only happen if an older build wrote a second
+            // file for the run. The newest is the one with the most in it.
+            return matches.Length == 0
+                ? null
+                : matches.OrderByDescending(File.GetLastWriteTimeUtc).First();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not look for an existing recording of run {runId}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads a recording back off disk, or returns null if it cannot be read as
+    /// one (already logged). State objects come back as <c>JsonElement</c>s and
+    /// re-serialize unchanged, so a reloaded file is written out exactly as it
+    /// came in.
+    /// </summary>
+    internal TrajectoryFile? Read(string path)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<TrajectoryFile>(File.ReadAllText(path), _options);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not read the existing recording at {path} ({ex.Message}); " +
+                     "starting a new file for this run.");
+            return null;
+        }
     }
 
     /// <summary>

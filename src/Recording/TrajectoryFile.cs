@@ -26,8 +26,12 @@ internal sealed class TrajectoryFile
     /// </summary>
     public string StateBuilderCommit { get; init; } = "";
 
-    /// <summary>Stable per-run identifier; also the filename suffix.</summary>
-    public string RunId { get; init; } = "";
+    /// <summary>
+    /// Stable per-run identifier - the run's start time in epoch seconds - which
+    /// is also the filename suffix. Settable because a run has no readable id
+    /// until its first save; see <see cref="RecordingSession.AdoptRunId"/>.
+    /// </summary>
+    public string RunId { get; set; } = "";
 
     public RunMeta Run { get; init; } = new();
 
@@ -72,7 +76,11 @@ internal sealed class RunMeta
     /// </summary>
     public int NumReloads { get; set; }
 
-    /// <summary>Epoch seconds, from the game's own run history.</summary>
+    /// <summary>
+    /// Epoch seconds when the run began, from the game's own save. Identical to
+    /// <see cref="TrajectoryFile.RunId"/>; 0 only if a run ended before it ever
+    /// saved.
+    /// </summary>
     public long StartTime { get; set; }
 }
 

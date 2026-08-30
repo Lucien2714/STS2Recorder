@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using System.IO;
 using System.Reflection;
 using Godot;
 using HarmonyLib;
@@ -21,7 +23,8 @@ namespace STS2_Recorder;
 ///      code is exception-guarded; a failure loses recording fidelity, never the
 ///      player's progress.
 ///   2. Match STS2MCP's state output exactly, by compiling its serializer
-///      verbatim (see vendor/README.md) rather than reimplementing it.
+///      straight from the vendor/STS2MCP submodule (see vendor/README.md)
+///      rather than reimplementing it.
 ///   3. Stay passive. This mod reads and observes; it never enqueues an action
 ///      or mutates game state.
 /// </summary>
@@ -33,7 +36,7 @@ public static class RecorderMod
     /// <summary>Version, stamped from mod_manifest.json at build time.</summary>
     internal static readonly string Version = ResolveAssemblyVersion();
 
-    /// <summary>STS2MCP commit that produced the vendored state serializer.</summary>
+    /// <summary>STS2MCP submodule commit the state serializer was built from.</summary>
     internal static readonly string StateBuilderCommit = ResolveStateBuilderCommit();
 
     private static RecorderConfig? _config;
@@ -68,7 +71,7 @@ public static class RecorderMod
             ConnectFrameCallback();
 
             Log.Info($"v{Version} recording to {_config.OutputDir}");
-            Log.Info($"State serializer vendored from STS2MCP @ {Shorten(StateBuilderCommit)}");
+            Log.Info($"State serializer built from STS2MCP @ {Shorten(StateBuilderCommit)}");
         }
         catch (Exception ex)
         {
@@ -113,41 +116,117 @@ public static class RecorderMod
 
         if (_writer == null) return;
 
-        string runId = RunContext.GetRunId();
-
-        // Resuming a save re-enters this path for a run we may already hold.
-        // Keeping the existing session preserves one-file-per-run across a
-        // quit-and-continue, which is the whole point of keying on the game's
-        // own run id rather than the wall clock.
-        if (Session is { IsClosed: false } existing && existing.RunId == runId)
+        // Still holding an open session means no run end was observed since it
+        // was created, so this can only be the same run becoming active again.
+        // Keeping it preserves one file across that hop rather than starting a
+        // second one.
+        if (Session is { IsClosed: false } existing)
         {
             existing.MarkResumed();
-            Log.Info($"Resumed run {runId}; continuing {existing.FileName}");
+            Log.Info($"Run {existing.RunId} resumed; continuing {existing.FileName}");
             return;
         }
 
+        // The run has no readable id yet - the game only publishes it in the
+        // save - so the session starts under a placeholder and adopts the real
+        // one at the first save, before anything is written. See
+        // RecordingSession.AdoptRunId.
+        // Run metadata starts empty for the same reason the id does: nothing on
+        // the live RunManager describes this run yet. The save hook fills both
+        // in. See RunSaveManagerSaveRunPatch.
         Session = new RecordingSession(
             _writer,
-            runId,
-            RunContext.GetRunMeta(),
+            RunContext.NewProvisionalRunId(),
+            new RunMeta(),
             DateTime.UtcNow,
             Version,
             StateBuilderCommit);
 
-        Log.Info($"Recording run {runId} to {Session.FileName}");
+        Log.Info($"Recording a new run to {Session.FileName} (id pending first save)");
     }
 
-    private static void OnRunEnded()
+    /// <summary>
+    /// Closes the recording of a run that has just ended, whether by victory,
+    /// death, or abandon. Called from the run-end hook while the run is still
+    /// intact, so the terminal step holds the real final state.
+    /// </summary>
+    internal static void FinishRun(bool victory)
     {
         if (Session is not { IsClosed: false } session) return;
 
-        // The final state is captured before RunManager finishes tearing down,
-        // so a game-over screen is still readable here.
-        session.Close(RunContext.CaptureState(), RunContext.GetOutcome());
+        // A run that ended without ever saving still has no id, but the game
+        // built its history record on the way into this call, so the start time
+        // is readable now. This is the last chance to name the file correctly.
+        session.AdoptRunId(RunContext.GetHistoryStartTime());
+        session.Close(RunContext.CaptureState(), RunContext.GetOutcome(victory));
 
         Log.Info($"Run {session.RunId} ended after {session.Trajectory.Steps.Count} step(s).");
         Session = null;
     }
+
+    /// <summary>
+    /// Handles the run going inactive. Anything still open here was left rather
+    /// than ended - a save-and-quit to the menu - because a real ending closes
+    /// the session from the run-end hook first.
+    /// </summary>
+    private static void OnRunEnded()
+    {
+        if (Session is not { IsClosed: false } session)
+        {
+            Session = null;
+            return;
+        }
+
+        // No outcome and no terminal step: the run is unfinished and can be
+        // continued later. Writing one here would record the main menu as the
+        // player's final state and invent an ending the run never had.
+        session.AdoptRunId(RunContext.GetHistoryStartTime());
+        session.Close(finalState: null, outcome: null);
+
+        Log.Info($"Run {session.RunId} left with {session.Trajectory.Steps.Count} step(s) " +
+                 "and no outcome; continuing it will record to a new file with the same id.");
+        Session = null;
+    }
+
+    /// <summary>
+    /// Stamps the outcome onto the recording of a run abandoned from the main
+    /// menu, where there is no live run and so no session to close.
+    ///
+    /// The recording was already closed without an outcome when the player quit
+    /// to the menu, so this reopens that file by run id and finishes it. Does
+    /// nothing if the run was never recorded, or if its file already has an
+    /// outcome.
+    /// </summary>
+    internal static void RecordAbandonedFromMenu(long runStartTime, int floorReached) =>
+        Log.Guard("Menu abandon", () =>
+        {
+            if (_writer == null || runStartTime <= 0) return;
+
+            string runId = runStartTime.ToString(CultureInfo.InvariantCulture);
+
+            string? path = _writer.FindExisting(runId);
+            if (path == null)
+            {
+                Log.Info($"Run {runId} was abandoned from the menu but was never recorded.");
+                return;
+            }
+
+            var trajectory = _writer.Read(path);
+            if (trajectory == null || trajectory.Outcome != null) return;
+
+            trajectory.Outcome = new RunOutcome
+            {
+                Victory      = false,
+                Abandoned    = true,
+                FloorReached = floorReached,
+                EndedAt      = RecordingSession.Timestamp(DateTime.UtcNow)
+            };
+            trajectory.LastSavedAt = trajectory.Outcome.EndedAt;
+
+            string fileName = Path.GetFileName(path);
+            if (_writer.Write(trajectory, fileName) != null)
+                Log.Info($"Run {runId} abandoned from the menu; outcome recorded to {fileName}.");
+        });
 
     /// <summary>
     /// Flushes the active recording. Called when the game saves.

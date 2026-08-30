@@ -57,60 +57,45 @@ internal static class RunContext
     }
 
     /// <summary>
-    /// Stable identifier for the current run: the run's start time in epoch
-    /// seconds, from the game's own run history.
+    /// The run's start time in epoch seconds, or 0 while it is not yet knowable.
     ///
-    /// This survives quitting and resuming - which is exactly what makes
-    /// one-file-per-run work across a continue - because the game persists it in
-    /// the save rather than regenerating it on load. Falls back to a wall-clock
-    /// stamp so a recording always gets a filename even if history is not ready.
+    /// This is the recorder's run id: the game mints it when a run begins, saves
+    /// it, and passes it back unchanged on load, so it is the one value that is
+    /// identical for a run and every continue of it.
+    ///
+    /// It is not readable at run start. <c>RunManager</c> keeps it in a private
+    /// field and only publishes it in two places: the <c>SerializableRun</c>
+    /// handed to every save, and <c>RunManager.History</c> - which is not the
+    /// live run's history but a summary record built when a run *ends*
+    /// (<c>OnEnded</c> and the abandon paths call
+    /// <c>RunHistoryUtilities.CreateRunHistoryEntry</c>, the only assignment to
+    /// it). Reading it during a run therefore yields null, which is why the id
+    /// is adopted from the first save instead; see
+    /// <see cref="RecordingSession.AdoptRunId"/>.
     /// </summary>
-    internal static string GetRunId()
+    internal static long GetHistoryStartTime()
     {
         try
         {
-            long startTime = RunManager.Instance.History?.StartTime ?? 0;
-            if (startTime != 0) return startTime.ToString();
+            return RunManager.Instance.History?.StartTime ?? 0;
         }
         catch (Exception ex)
         {
-            Log.Warn($"Could not read run id: {ex.Message}");
+            Log.Warn($"Could not read run start time: {ex.Message}");
+            return 0;
         }
-
-        return $"unknown{DateTime.UtcNow:yyyyMMddHHmmss}";
     }
 
     /// <summary>
-    /// Reads the run-level metadata. Individual fields degrade to their defaults
-    /// rather than failing the whole read.
+    /// The id a run is recorded under until the game reveals its real one.
+    ///
+    /// A run is recorded from its first frame, but its id only becomes readable
+    /// at the first save (a second or two later), so a session needs something
+    /// to be called in the meantime. Nothing is written to disk under this id
+    /// unless a run somehow ends without ever saving.
     /// </summary>
-    internal static RunMeta GetRunMeta()
-    {
-        var meta = new RunMeta();
-
-        try
-        {
-            var history = RunManager.Instance.History;
-            if (history == null) return meta;
-
-            meta.Seed      = history.Seed;
-            meta.Ascension = history.Ascension;
-            meta.StartTime = history.StartTime;
-            meta.GameMode  = history.GameMode.ToString();
-
-            // Character lives on the per-player history record. Singleplayer has
-            // exactly one, and this recorder only ever runs in singleplayer.
-            var players = history.Players;
-            if (players is { Count: > 0 })
-                meta.Character = players[0].Character.Entry;
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"Could not read run metadata: {ex.Message}");
-        }
-
-        return meta;
-    }
+    internal static string NewProvisionalRunId() =>
+        $"pending{DateTime.UtcNow:yyyyMMddHHmmss}";
 
     /// <summary>Floor number reached, or 0 if unavailable.</summary>
     internal static int GetFloorReached()
@@ -127,17 +112,19 @@ internal static class RunContext
 
     /// <summary>
     /// Builds the outcome record for a run that has just ended.
+    ///
+    /// <paramref name="victory"/> comes from the game's own run-end call rather
+    /// than being read back off <c>History</c>, so it is right even if the
+    /// history record is not where this expects it to be.
     /// </summary>
-    internal static RunOutcome GetOutcome()
+    internal static RunOutcome GetOutcome(bool victory)
     {
-        bool victory = false;
         bool abandoned = false;
 
         try
         {
-            var run = RunManager.Instance;
-            abandoned = run.IsAbandoned;
-            victory = run.History?.Win ?? false;
+            // Set before the game kills the party, so it is already true here.
+            abandoned = RunManager.Instance.IsAbandoned;
         }
         catch (Exception ex)
         {
@@ -154,7 +141,7 @@ internal static class RunContext
     }
 
     /// <summary>
-    /// Snapshots the full game state using STS2MCP's vendored serializer, so the
+    /// Snapshots the full game state using STS2MCP's own serializer, so the
     /// recorded object is identical to its <c>GET /api/v1/singleplayer</c>
     /// response. Returns null if the snapshot fails, which is recorded as a step
     /// with no state rather than dropping the action.

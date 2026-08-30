@@ -36,7 +36,10 @@ opens no ports and never enqueues an action.
 Early. What works today:
 
 - [x] Loads alongside STS2MCP, opens no port, alters no gameplay
-- [x] Detects run start, resume, and end; one file per run across a continue
+- [x] Detects run start, resume, and end; one file per run, keyed on the game's
+      own run id, across any number of quit-and-continue sittings
+- [x] Records the outcome of victory, death, and abandon — including abandoning
+      from the main menu without loading the run
 - [x] Flushes on every game save
 - [x] Writes run metadata and outcome
 - [ ] Combat action capture (`play_card`, `end_turn`)
