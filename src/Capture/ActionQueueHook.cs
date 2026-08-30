@@ -90,10 +90,48 @@ internal static class ActionQueueRequestEnqueuePatch
 
         return new RecordedAction
         {
-            Action = "play_card",
-            Args   = args,
-            Label  = CardLabel(index, state) ?? play.CardModelId.Entry
+            Action  = "play_card",
+            Args    = args,
+            Label   = CardLabel(index, state) ?? play.CardModelId.Entry,
+            Subject = CardSubject(card, index, state, play.CardModelId.Entry)
         };
+    }
+
+    /// <summary>
+    /// Identifies the card itself: which card it is, how far upgraded, and what
+    /// it is enchanted with.
+    ///
+    /// The hand index alone does not say what was played, and neither does the
+    /// state's hand entry in every case - it carries the card's id and an
+    /// upgraded flag, but nothing about enchantments, so an enchanted Strike and
+    /// a plain one are indistinguishable there. Everything an enchantment or a
+    /// multi-level upgrade changes is read off the card itself.
+    ///
+    /// The name comes from the recorded state rather than the model, so it is
+    /// the same localized text that appears in the hand beside it.
+    /// </summary>
+    private static Dictionary<string, object?>? CardSubject(
+        CardModel? card, int index, Dictionary<string, object?>? state, string modelId)
+    {
+        if (card == null) return null;
+
+        var subject = new Dictionary<string, object?>
+        {
+            ["kind"]          = "card",
+            ["id"]            = modelId,
+            ["name"]          = CardLabel(index, state),
+            ["is_upgraded"]   = card.IsUpgraded,
+            ["upgrade_level"] = card.CurrentUpgradeLevel
+        };
+
+        if (card.Enchantment is { } enchantment)
+            subject["enchantment"] = new Dictionary<string, object?>
+            {
+                ["id"]     = enchantment.Id.Entry,
+                ["amount"] = enchantment.Amount
+            };
+
+        return subject;
     }
 
     /// <summary><c>use_potion</c>, by slot, with its target if it had one.</summary>

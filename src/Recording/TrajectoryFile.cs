@@ -133,6 +133,21 @@ internal sealed class RecordedAction
     /// Not needed to replay the action; invaluable when reading a file by eye.
     /// </summary>
     public string? Label { get; init; }
+
+    /// <summary>
+    /// What was acted on, identified in its own right rather than by where it
+    /// sat in a list.
+    ///
+    /// <see cref="Args"/> says which position in the hand was played, because
+    /// that is what replaying the step needs. It does not say what that card
+    /// *was*, and two cards can share a name and a position while differing in
+    /// what they do - an upgraded Strike, an enchanted one. The state beside the
+    /// step carries the card's id and upgrade flag but not its enchantment, so
+    /// without this a recording cannot always answer "which card was that".
+    ///
+    /// Null for actions whose subject the state already pins down.
+    /// </summary>
+    public Dictionary<string, object?>? Subject { get; init; }
 }
 
 /// <summary>How the run ended.</summary>

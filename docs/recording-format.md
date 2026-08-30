@@ -92,8 +92,16 @@ happened.
   "state": { "state_type": "combat", /* ... */ },
   "action": {
     "action": "play_card",
-    "args": { "card_index": 2, "target": "KIN_PRIEST_0" },
-    "label": "Strike"
+    "args": { "card_index": 2, "target": "kin_priest_0" },
+    "label": "Strike",
+    "subject": {
+      "kind": "card",
+      "id": "STRIKE",
+      "name": "Strike",
+      "is_upgraded": true,
+      "upgrade_level": 1,
+      "enchantment": { "id": "SEARING", "amount": 2 }
+    }
   },
   "resumed": true
 }
@@ -115,6 +123,15 @@ be replayed by POSTing `{ "action": ..., ...args }` to
 `/api/v1/singleplayer`. `label` is a human-readable description of what was acted
 on; it is not needed to replay the step, and is there to make files readable by
 eye.
+
+`subject` identifies what was acted on in its own right, rather than by where it
+sat in a list. `card_index` is what replaying needs, but it does not say what the
+card *was*: two cards can share a name and a hand position and still differ in
+what they do. The state's hand entry carries a card's `id` and `is_upgraded`, but
+**not** its enchantment — so for `play_card`, `subject` is the only place a
+recording says whether the Strike that was played was enchanted, and to what
+degree it was upgraded. It is absent for actions whose subject the paired state
+already pins down, and never needed to replay a step.
 
 Captured today:
 
