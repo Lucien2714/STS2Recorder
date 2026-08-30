@@ -1,0 +1,18 @@
+<Project>
+  <!-- Copy to Directory.Build.props (gitignored) and set your own paths.
+
+       MSBuild imports this before STS2_Recorder.csproj, whose defaults are all
+       guarded by Condition="'$(Prop)' == ''", so values here win. A
+       -p:STS2GameDir=... on the command line still overrides them.
+
+       This is what makes the sts2.dll / GodotSharp.dll / 0Harmony.dll
+       references resolve inside the IDE, which loads the project without
+       build.ps1's -GameDir argument. -->
+  <PropertyGroup>
+    <STS2GameDir>E:\SteamLibrary\steamapps\common\Slay the Spire 2</STS2GameDir>
+
+    <!-- Where scripts/sync-upstream.ps1 and the build's drift check look for
+         the STS2MCP repo. Defaults to a sibling directory. -->
+    <Sts2McpDir>E:\personal\dev\STS2MCP</Sts2McpDir>
+  </PropertyGroup>
+</Project>

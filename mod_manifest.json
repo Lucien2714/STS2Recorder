@@ -1,0 +1,10 @@
+{
+  "id": "STS2_Recorder",
+  "name": "STS2 Recorder",
+  "author": "Lucien2714",
+  "description": "Records human playthroughs as (state, action) trajectories",
+  "version": "0.1.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": false
+}

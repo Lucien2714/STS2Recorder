@@ -1,0 +1,16 @@
+# Normalize to LF in the repository; check out native on Windows.
+* text=auto
+
+# Scripts and sources are explicit so a stray editor setting cannot flip them.
+*.cs        text diff=csharp
+*.csproj    text
+*.props     text
+*.json      text
+*.md        text
+*.txt       text
+*.ps1       text
+
+# Vendored copies of STS2MCP source. Excluded from language stats and collapsed
+# in diffs -- they are not this repo's code, and a re-sync should not read as a
+# thousand-line change. See vendor/README.md.
+vendor/sts2mcp/** linguist-vendored

@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+out/
+
+# Machine-local game install path (see Directory.Build.props.example)
+Directory.Build.props
+
+# IDE
+.idea/
+.vs/
+*.user
+*.DotSettings.user
+
+# Recordings, if anyone points output_dir at the repo
+recordings/
+*.run.json

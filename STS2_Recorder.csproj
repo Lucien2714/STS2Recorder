@@ -1,0 +1,85 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+    <AssemblyName>STS2_Recorder</AssemblyName>
+    <RootNamespace>STS2_Recorder</RootNamespace>
+    <!-- A clean build must be warning-free; the vendored files are held to the
+         same bar as our own so upstream regressions surface here too. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
+    <!-- Single source of truth for the mod version is mod_manifest.json. Read it
+         at build time and stamp it onto the assembly so the DLL, the version
+         recorded in each trajectory file, and the manifest cannot drift apart. -->
+    <ModVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)mod_manifest.json')), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</ModVersion>
+    <Version>$(ModVersion)</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
+    <!-- Which STS2MCP commit produced the vendored state serializer. Stamped
+         into the assembly and into every recording, so a trajectory file can
+         always be traced back to the exact BuildGameState() that wrote it. -->
+    <StateBuilderCommit>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)vendor/UPSTREAM.json')), '"commit"\s*:\s*"([^"]+)"').Groups[1].Value)</StateBuilderCommit>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="StateBuilderCommit" Value="$(StateBuilderCommit)" />
+  </ItemGroup>
+
+  <!-- === Game assembly references ============================================
+       Building requires a real Slay the Spire 2 install; there is no way to
+       build in a bare checkout. Set STS2GameDir in Directory.Build.props (see
+       Directory.Build.props.example) or pass -p:STS2GameDir=... -->
+  <PropertyGroup>
+    <STS2GameDir Condition="'$(STS2GameDir)' == ''">D:\SteamLibrary\steamapps\common\Slay the Spire 2</STS2GameDir>
+    <STS2GameDataDir Condition="'$(STS2GameDataDir)' == '' and '$(OS)' == 'Windows_NT'">$(STS2GameDir)/data_sts2_windows_x86_64</STS2GameDataDir>
+    <STS2GameDataDir Condition="'$(STS2GameDataDir)' == '' and $([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))">$(STS2GameDir)/SlayTheSpire2.app/Contents/Resources/data_sts2_macos_arm64</STS2GameDataDir>
+    <STS2GameDataDir Condition="'$(STS2GameDataDir)' == '' and '$(OS)' != 'Windows_NT' and !$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))">$(STS2GameDir)/data_sts2_linuxbsd_x86_64</STS2GameDataDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="sts2">
+      <HintPath>$(STS2GameDataDir)/sts2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="GodotSharp">
+      <HintPath>$(STS2GameDataDir)/GodotSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(STS2GameDataDir)/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- === Sources =============================================================
+       EnableDefaultCompileItems is off so the two source sets stay visibly
+       distinct: ours under src/, STS2MCP's vendored copies under vendor/.
+       See vendor/README.md for why the vendored files exist and how to
+       refresh them. -->
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" />
+    <Compile Include="vendor/sts2mcp/*.cs">
+      <Link>Vendored/%(Filename)%(Extension)</Link>
+      <Visible>true</Visible>
+    </Compile>
+  </ItemGroup>
+
+  <!-- === Vendored-source drift check =========================================
+       Warns (never fails) when vendor/sts2mcp no longer matches the STS2MCP
+       commit recorded in vendor/UPSTREAM.json. A stale or hand-edited copy
+       means recordings stop matching STS2MCP's API output, which is the whole
+       point of vendoring rather than reimplementing. -->
+  <Target Name="CheckVendoredSourceDrift" BeforeTargets="CoreCompile"
+          Condition="'$(OS)' == 'Windows_NT' and '$(SkipDriftCheck)' != 'true'">
+    <PropertyGroup>
+      <_DriftArgs>-NoProfile -ExecutionPolicy Bypass -File "$(MSBuildThisFileDirectory)scripts/check-drift.ps1"</_DriftArgs>
+      <_DriftArgs Condition="'$(Sts2McpDir)' != ''">$(_DriftArgs) -Source "$(Sts2McpDir)"</_DriftArgs>
+    </PropertyGroup>
+    <Exec Command="pwsh $(_DriftArgs)" ContinueOnError="true" StandardOutputImportance="normal" />
+  </Target>
+
+</Project>

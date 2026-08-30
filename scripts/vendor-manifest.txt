@@ -1,0 +1,52 @@
+# Files vendored from STS2MCP into vendor/sts2mcp/.
+#
+# These are compiled verbatim into STS2_Recorder.dll so that the recorder's
+# state serialization is produced by the *same code* as STS2MCP's
+# GET /api/v1/singleplayer response. Never edit the copies in vendor/sts2mcp/ --
+# fix upstream in STS2MCP and re-run scripts/sync-upstream.ps1.
+#
+# WHY SO MANY FILES
+# BuildGameState() is one method on a partial class whose pieces call freely
+# across all of it, so the compilable unit is nearly the whole class, not just
+# McpMod.StateBuilder.cs. Each file below is here because dropping it breaks the
+# build:
+#
+#   McpMod.StateBuilder.cs        BuildGameState() itself - the reason we vendor.
+#   McpMod.Helpers.cs             SafeGetText, node search, FTUE/popup detection.
+#   McpMod.Formatting.cs          FormatAsMarkdown; shares helpers with the above.
+#   McpMod.MultiplayerState.cs    BuildMultiplayerGameState; referenced by the
+#                                 shared state entry paths.
+#   McpMod.Actions.cs             StateBuilder calls GetProgressEpochIdsByState,
+#                                 ModifierOptionPrefix and
+#                                 FindCrystalSphereProceedButton, which live here
+#                                 and shape emitted state. Its ExecuteAction
+#                                 switch compiles as dead code - the recorder is
+#                                 passive and never invokes it - and doubles as
+#                                 the reference for the action names and argument
+#                                 shapes the capture layer reproduces.
+#   McpMod.MultiplayerActions.cs  Referenced by Actions.cs.
+#   McpMod.Profile.cs             Referenced by Actions.cs (ExecuteProfileAction).
+#   McpMod.Compendium.cs          Referenced by Profile.cs
+#                                 (ResolveProfileProgressPath).
+#   McpMod.Wiki.cs                Referenced by Compendium.cs.
+#
+# Deliberately NOT vendored:
+#   McpMod.cs             HttpListener + [ModInitializer]. The recorder must not
+#                         open a port, and two [ModInitializer] classes in one
+#                         DLL would both run. src/McpModShim.cs re-supplies the
+#                         three members the vendored code needs from it.
+#   McpMod.SettingsUI.cs  Harmony patches for STS2MCP's own settings panel; the
+#                         recorder must not alter game settings.
+#
+# One path per line, relative to the STS2MCP repo root. Blank lines and
+# '#' comments are ignored.
+
+McpMod.StateBuilder.cs
+McpMod.Helpers.cs
+McpMod.Formatting.cs
+McpMod.MultiplayerState.cs
+McpMod.Actions.cs
+McpMod.MultiplayerActions.cs
+McpMod.Profile.cs
+McpMod.Compendium.cs
+McpMod.Wiki.cs
