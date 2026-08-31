@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Nodes.Events.Custom;
@@ -49,7 +50,8 @@ internal static class UiClicks
     private static bool IsDecision(NClickableControl control) =>
         control is NEventOptionButton or NRestSiteButton or NRewardButton
                 or NCardRewardAlternativeButton or NRelicBasicHolder or NProceedButton
-        || IsAncientDialogue(control);
+        || IsAncientDialogue(control)
+        || IsSelectionButton(control);
 
     private static RecordedAction? Describe(NClickableControl control, Dictionary<string, object?>? state) =>
         control switch
@@ -65,6 +67,8 @@ internal static class UiClicks
                 Action = "proceed",
                 Label  = proceed.IsSkip ? "skip" : "proceed"
             },
+
+            _ when IsSelectionButton(control) => DescribeSelectionButton(control),
 
             _ => IsAncientDialogue(control)
                 ? new RecordedAction { Action = "advance_dialogue" }
@@ -133,6 +137,75 @@ internal static class UiClicks
     /// </summary>
     private static bool IsAncientDialogue(NClickableControl control) =>
         control.Name == "DialogueHitbox" && Ancestor<NAncientEventLayout>(control) != null;
+
+    // --- Finishing a selection -------------------------------------------------
+    //
+    // The picks themselves are captured in CardSelections; these are the buttons
+    // that finish or abandon a selection once it is made.
+
+    /// <summary>
+    /// Confirm, cancel and skip are ordinary clickables - a human's click and
+    /// STS2MCP's <c>ForceClick</c> both land here - but the same button types
+    /// carry the pause menu and the settings screen too, so one only counts
+    /// where it finishes a selection. Anything the description below does not
+    /// name is not a decision, and is not worth a state snapshot to find out.
+    /// </summary>
+    private static bool IsSelectionButton(NClickableControl control) =>
+        control is NConfirmButton or NBackButton or NChoiceSelectionSkipButton
+        && DescribeSelectionButton(control) != null;
+
+    /// <summary>
+    /// Named for what the button belongs to, exactly as the action API names it:
+    /// the bundle screen has confirm and cancel actions of its own, the
+    /// choose-a-card screen's skip is a cancel, the relic screen's skip is its
+    /// own action, and the hand confirms an in-combat selection with a fourth.
+    /// Each is the action STS2MCP presses that same button with.
+    /// </summary>
+    private static RecordedAction? DescribeSelectionButton(NClickableControl control)
+    {
+        bool confirm = control is NConfirmButton;
+
+        return SelectionOwning(control) switch
+        {
+            NChooseABundleSelectionScreen => new RecordedAction
+            {
+                Action = confirm ? "confirm_bundle_selection" : "cancel_bundle_selection"
+            },
+            NCardGridSelectionScreen or NChooseACardSelectionScreen => new RecordedAction
+            {
+                Action = confirm ? "confirm_selection" : "cancel_selection"
+            },
+
+            // The relic screen offers only the skip; the relics themselves are
+            // holders, captured as select_relic above.
+            NChooseARelicSelection when control is NChoiceSelectionSkipButton =>
+                new RecordedAction { Action = "skip_relic_selection" },
+
+            // The hand carries buttons of its own all through combat. Only its
+            // confirm counts, and only while it is asking for cards.
+            NPlayerHand hand when confirm && hand.IsInCardSelection =>
+                new RecordedAction { Action = "combat_confirm_selection" },
+
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// The screen - or the hand - a button sits under, or null if it is not part
+    /// of a selection at all.
+    /// </summary>
+    private static Node? SelectionOwning(Node node)
+    {
+        for (var current = node.GetParent(); current != null; current = current.GetParent())
+        {
+            if (current is NChooseABundleSelectionScreen or NCardGridSelectionScreen
+                        or NChooseACardSelectionScreen or NChooseARelicSelection
+                        or NPlayerHand)
+                return current;
+        }
+
+        return null;
+    }
 
     // --- Plumbing --------------------------------------------------------------
 
@@ -203,5 +276,18 @@ internal static class NClickableControlReleasePatch
 [HarmonyPatch(typeof(NClickableControl), nameof(NClickableControl.ForceClick))]
 internal static class NClickableControlForceClickPatch
 {
-    private static void Prefix(NClickableControl __instance) => UiClicks.Record(__instance);
+    /// <summary>
+    /// Returns false to swallow the click, which happens for exactly one caller:
+    /// the state builder pressing a button of its own while this recorder is
+    /// snapshotting. A snapshot must not act on the run it describes, and a
+    /// click it makes is not a decision anyone took, so it is neither recorded
+    /// nor performed. See <see cref="PassiveCapture"/>.
+    /// </summary>
+    private static bool Prefix(NClickableControl __instance)
+    {
+        if (PassiveCapture.InProgress) return false;
+
+        UiClicks.Record(__instance);
+        return true;
+    }
 }

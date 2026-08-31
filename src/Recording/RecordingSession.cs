@@ -47,7 +47,7 @@ internal sealed class RecordingSession
         RunMeta meta,
         DateTime startedAtUtc,
         string recorderVersion,
-        string stateBuilderCommit)
+        string gameVersion)
     {
         _writer       = writer;
         _startedAtUtc = startedAtUtc;
@@ -56,11 +56,11 @@ internal sealed class RecordingSession
 
         Trajectory = new TrajectoryFile
         {
-            RecorderVersion    = recorderVersion,
-            StateBuilderCommit = stateBuilderCommit,
-            RunId              = runId,
-            Run                = meta,
-            StartedAt          = Timestamp(startedAtUtc)
+            RecorderVersion = recorderVersion,
+            GameVersion     = gameVersion,
+            RunId           = runId,
+            Run             = meta,
+            StartedAt       = Timestamp(startedAtUtc)
         };
     }
 
@@ -142,7 +142,7 @@ internal sealed class RecordingSession
             previous.Outcome != null                                       ? "it is already finished"
             : previous.SchemaVersion != Trajectory.SchemaVersion           ? "it uses a different schema version"
             : previous.RecorderVersion != Trajectory.RecorderVersion       ? $"it was recorded by v{previous.RecorderVersion}"
-            : previous.StateBuilderCommit != Trajectory.StateBuilderCommit ? "its states came from a different STS2MCP build"
+            : previous.GameVersion != Trajectory.GameVersion               ? $"it was recorded on game {previous.GameVersion}"
             : "";
 
         if (reason != "")

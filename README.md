@@ -17,16 +17,17 @@ replaying a human run through an agent harness.
 
 ## Relationship to STS2MCP
 
-State serialization is not reimplemented here.
-[STS2MCP](https://github.com/Lucien2714/STS2MCP) is a git submodule at
+State serialization is not reimplemented here. Source files from
+[STS2MCP](https://github.com/Gennadiyev/STS2MCP) are vendored at
 `vendor/STS2MCP`, and its `BuildGameState()` is compiled straight into this mod,
 so a recorded `state` object is **identical** to what STS2MCP's
 `GET /api/v1/singleplayer` returns, and captured actions use the same names and
 argument shapes as its action API.
 
 Practically, that means a recorded human run and an agent's run through the MCP
-server are the same data format, and every recording is stamped with the exact
-submodule commit that produced it. See [`vendor/README.md`](vendor/README.md).
+server are the same data format. Every recording carries the game version it was
+read out of, so a dataset spanning a game update stays interpretable. See
+[`vendor/README.md`](vendor/README.md).
 
 The two mods are independent and can be installed side by side; the recorder
 opens no ports and never enqueues an action.
@@ -46,23 +47,25 @@ Early. What works today:
 - [x] Route capture (`choose_map_node`, `claim_treasure_relic`, `proceed`)
 - [x] Room capture (events including Ancient rooms, rest sites, rewards, relic
       choices)
-- [ ] Shop purchases, card reward selection, card-selection screens, Crystal
-      Sphere
+- [x] Card-selection screens (`select_card`, `select_bundle`, and the confirm,
+      cancel and skip that close them) — the cards on offer are recorded with
+      the pick
+- [x] Shop purchases (`shop_purchase`), merchant and fake merchant alike
+- [x] Card rewards (`select_card_reward`), relic skips, and in-combat hand
+      selection (`combat_select_card`)
+- [ ] Crystal Sphere
 
 ## Requirements
 
 - Slay the Spire 2 installed
 - [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
-- The `vendor/STS2MCP` submodule checked out (see below)
 - PowerShell 7+ for the build script
+
+A plain `git clone` is enough — the STS2MCP sources are vendored in the repo.
 
 ## Build
 
 ```powershell
-# One-off: fetch the STS2MCP submodule
-#   (cloning with --recurse-submodules does this for you)
-git submodule update --init --recursive
-
 # One-off: point the build at your game install
 Copy-Item Directory.Build.props.example Directory.Build.props   # then edit
 
@@ -79,12 +82,17 @@ bare checkout.
 
 ## Install
 
-Copy into `<game_install>/mods/`:
+The game loads a mod from its **own folder** under `mods/`, so copy both files
+into `<game_install>/mods/STS2Recorder/`:
 
 - `out/STS2_Recorder/STS2_Recorder.dll`
-- `mod_manifest.json`, renamed to `STS2_Recorder.json`
+- `mod_manifest.json` (keep the name)
 
-Or use `.\build.ps1 -Install`.
+Or use `.\build.ps1 -Install`, which puts them there and prints the installed
+DLL's timestamp. Close the game first — it holds the DLL open while running, and
+an install that cannot replace it is a fix that silently never loads. The mod
+logs its build time at startup, so the Godot console confirms which DLL is
+actually running.
 
 ## Configuration
 
@@ -122,6 +130,28 @@ Changes take effect on restart.
 
 See [`docs/recording-format.md`](docs/recording-format.md).
 
+## Credits
+
+This mod stands on **[STS2MCP](https://github.com/Gennadiyev/STS2MCP)** by
+**Yikun Ji ([Kunologist](https://github.com/Gennadiyev))**, MIT licensed.
+
+Its game-state serializer is not merely a dependency here — it *is* the state
+format this recorder writes. Its source is vendored under
+[`vendor/STS2MCP`](vendor/STS2MCP) and compiled into `STS2_Recorder.dll`, with
+their license alongside it; the capture layer additionally follows STS2MCP's
+action API for the name and arguments of every recorded decision. Without that
+work, matching an agent's view of the game to a human's would have meant
+reimplementing — and forever chasing — a serializer someone had already written
+well.
+
+The vendored copy carries local changes. It does not speak for upstream, and any
+bug you find in a recording is this repo's to answer for. See
+[`vendor/README.md`](vendor/README.md).
+
 ## License
 
-MIT
+MIT for this mod — see [`LICENSE`](LICENSE).
+
+The vendored STS2MCP sources under `vendor/STS2MCP` are MIT licensed and
+copyright Yikun Ji; their license travels with them in
+[`vendor/STS2MCP/LICENSE`](vendor/STS2MCP/LICENSE).

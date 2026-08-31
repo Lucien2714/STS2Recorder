@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions;
@@ -93,45 +92,8 @@ internal static class ActionQueueRequestEnqueuePatch
             Action  = "play_card",
             Args    = args,
             Label   = CardLabel(index, state) ?? play.CardModelId.Entry,
-            Subject = CardSubject(card, index, state, play.CardModelId.Entry)
+            Subject = CardIdentity.Describe(card, CardLabel(index, state))
         };
-    }
-
-    /// <summary>
-    /// Identifies the card itself: which card it is, how far upgraded, and what
-    /// it is enchanted with.
-    ///
-    /// The hand index alone does not say what was played, and neither does the
-    /// state's hand entry in every case - it carries the card's id and an
-    /// upgraded flag, but nothing about enchantments, so an enchanted Strike and
-    /// a plain one are indistinguishable there. Everything an enchantment or a
-    /// multi-level upgrade changes is read off the card itself.
-    ///
-    /// The name comes from the recorded state rather than the model, so it is
-    /// the same localized text that appears in the hand beside it.
-    /// </summary>
-    private static Dictionary<string, object?>? CardSubject(
-        CardModel? card, int index, Dictionary<string, object?>? state, string modelId)
-    {
-        if (card == null) return null;
-
-        var subject = new Dictionary<string, object?>
-        {
-            ["kind"]          = "card",
-            ["id"]            = modelId,
-            ["name"]          = CardLabel(index, state),
-            ["is_upgraded"]   = card.IsUpgraded,
-            ["upgrade_level"] = card.CurrentUpgradeLevel
-        };
-
-        if (card.Enchantment is { } enchantment)
-            subject["enchantment"] = new Dictionary<string, object?>
-            {
-                ["id"]     = enchantment.Id.Entry,
-                ["amount"] = enchantment.Amount
-            };
-
-        return subject;
     }
 
     /// <summary><c>use_potion</c>, by slot, with its target if it had one.</summary>
@@ -226,17 +188,23 @@ internal static class ActionQueueRequestEnqueuePatch
     /// <summary>
     /// The card being played. <c>PlayCardAction</c> publishes the model id but
     /// not the instance, and two copies of Strike in hand are different
-    /// instances, so the field is read directly. A game update that renames it
-    /// costs the card index, not the step.
+    /// instances, so the instance is looked up from the combat card registry the
+    /// action carries a handle to.
+    ///
+    /// The action does hold the instance in a private <c>_card</c> field, and
+    /// reading that field is what this used to do - but the field is assigned in
+    /// <c>ExecuteAction()</c>, and this hook runs when the action is *enqueued*,
+    /// where it is always still null. That silently cost every <c>play_card</c>
+    /// step its <c>card_index</c> and its subject, and left the label as a raw
+    /// model id. <c>NetCombatCard</c> is set in the constructor instead, so it
+    /// is readable exactly when this needs it - and it resolves through the same
+    /// registry <c>ExecuteAction()</c> resolves through, to the same instance.
     /// </summary>
-    private static readonly FieldInfo? PlayedCardField =
-        AccessTools.Field(typeof(PlayCardAction), "_card");
-
     private static CardModel? PlayedCard(PlayCardAction play)
     {
         try
         {
-            return PlayedCardField?.GetValue(play) as CardModel;
+            return play.NetCombatCard.ToCardModelOrNull();
         }
         catch (Exception ex)
         {

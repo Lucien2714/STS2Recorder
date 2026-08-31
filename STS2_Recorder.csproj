@@ -7,8 +7,8 @@
     <LangVersion>12.0</LangVersion>
     <AssemblyName>STS2_Recorder</AssemblyName>
     <RootNamespace>STS2_Recorder</RootNamespace>
-    <!-- A clean build must be warning-free; the submodule's sources are held to
-         the same bar as our own so upstream regressions surface here too. -->
+    <!-- A clean build must be warning-free; the vendored sources are held to
+         the same bar as our own so a bad re-sync surfaces here too. -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
 
@@ -19,8 +19,14 @@
     <Version>$(ModVersion)</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
-    <!-- The STS2MCP submodule holding the state serializer we compile. -->
-    <Sts2McpSubmoduleDir>$(MSBuildThisFileDirectory)vendor/STS2MCP</Sts2McpSubmoduleDir>
+    <!-- Our copy of STS2MCP's state serializer. See vendor/README.md. -->
+    <Sts2McpDir>$(MSBuildThisFileDirectory)vendor/STS2MCP</Sts2McpDir>
+
+    <!-- Where vendor/STS2MCP was copied from. Documentation, not a build input:
+         nothing reads these but a person re-syncing the copy, who should update
+         both. See vendor/README.md. -->
+    <Sts2McpUpstreamCommit>2b89ea2ffd65bcf0202aaa8b632a62113a359add</Sts2McpUpstreamCommit>
+    <Sts2McpUpstreamRef>Lucien2714/STS2MCP@feat/custom-run</Sts2McpUpstreamRef>
   </PropertyGroup>
 
   <!-- === Game assembly references ============================================
@@ -51,85 +57,28 @@
 
   <!-- === Sources =============================================================
        EnableDefaultCompileItems is off so the two source sets stay visibly
-       distinct: ours under src/, STS2MCP's own source pulled in from the
-       vendor/STS2MCP submodule. See vendor/README.md.
+       distinct: ours under src/, and STS2MCP's under vendor/STS2MCP - a copy of
+       someone else's code, kept locally so it can be fixed here. See
+       vendor/README.md.
 
-       BuildGameState() is one method on a partial class whose pieces call
-       freely across each other, so the compilable unit is nearly the whole
-       class rather than one file, hence a whole-directory include with two
-       deliberate exclusions:
-
-         McpMod.cs             HttpListener + [ModInitializer]. The recorder must
-                               not open a port, and two [ModInitializer] classes
-                               in one DLL would both run. src/McpModShim.cs
-                               re-supplies the three members the rest of the
-                               class needs from it.
-         McpMod.SettingsUI.cs  Harmony patches for STS2MCP's own settings panel;
-                               the recorder must not alter game settings.
-
-       The glob is non-recursive, so the submodule's own bin/ and obj/ are never
-       picked up. -->
+       Named one by one rather than globbed: the copy holds only the files the
+       serializer actually needs, and a new file appearing there should be a
+       decision someone made, not something a wildcard swept in. -->
   <ItemGroup>
     <Compile Include="src/**/*.cs" />
-    <Compile Include="$(Sts2McpSubmoduleDir)/*.cs"
-             Exclude="$(Sts2McpSubmoduleDir)/McpMod.cs;$(Sts2McpSubmoduleDir)/McpMod.SettingsUI.cs">
+    <Compile Include="$(Sts2McpDir)/McpMod.StateBuilder.cs;$(Sts2McpDir)/McpMod.Helpers.cs;$(Sts2McpDir)/McpMod.StateBuilderSupport.cs">
       <Link>STS2MCP/%(Filename)%(Extension)</Link>
       <Visible>true</Visible>
     </Compile>
   </ItemGroup>
 
-  <!-- === Submodule checkout guard ============================================
-       A bare `git clone` leaves vendor/STS2MCP empty, which would otherwise
-       fail as a wall of "BuildGameState does not exist" errors. -->
-  <Target Name="CheckStateBuilderSubmodule" BeforeTargets="CoreCompile">
-    <Error Condition="!Exists('$(Sts2McpSubmoduleDir)/McpMod.StateBuilder.cs')"
-           Text="The STS2MCP submodule at vendor/STS2MCP is not checked out. Run: git submodule update --init --recursive" />
-  </Target>
-
-  <!-- === State serializer provenance =========================================
-       Which STS2MCP commit the state serializer was compiled from. Stamped onto
-       the assembly and into every recording, so a trajectory file can always be
-       traced back to the exact BuildGameState() that wrote it.
-
-       Read from the submodule's actual checkout rather than from the gitlink,
-       so a local `git checkout` inside vendor/STS2MCP is reported honestly; an
-       uncommitted edit to a source file there is stamped '&lt;sha&gt;-dirty'.
-       Without git (a source drop, an offline build box) the stamp degrades to
-       'unknown' rather than failing the build. -->
-  <Target Name="ResolveStateBuilderCommit" BeforeTargets="GetAssemblyAttributes;CoreCompile">
-    <PropertyGroup>
-      <_StateBuilderSha />
-      <_StateBuilderShaExit />
-      <_StateBuilderDirty />
-    </PropertyGroup>
-
-    <Exec Command="git -C &quot;$(Sts2McpSubmoduleDir)&quot; rev-parse HEAD"
-          ConsoleToMSBuild="true" StandardOutputImportance="low"
-          ContinueOnError="true" IgnoreExitCode="true">
-      <Output TaskParameter="ConsoleOutput" PropertyName="_StateBuilderSha" />
-      <Output TaskParameter="ExitCode" PropertyName="_StateBuilderShaExit" />
-    </Exec>
-    <Exec Command="git -C &quot;$(Sts2McpSubmoduleDir)&quot; status --porcelain -uno -- &quot;*.cs&quot;"
-          Condition="'$(_StateBuilderShaExit)' == '0'"
-          ConsoleToMSBuild="true" StandardOutputImportance="low"
-          ContinueOnError="true" IgnoreExitCode="true">
-      <Output TaskParameter="ConsoleOutput" PropertyName="_StateBuilderDirty" />
-    </Exec>
-
-    <PropertyGroup>
-      <StateBuilderCommit>unknown</StateBuilderCommit>
-      <StateBuilderCommit Condition="'$(_StateBuilderShaExit)' == '0' and '$(_StateBuilderSha)' != ''">$(_StateBuilderSha.Trim())</StateBuilderCommit>
-      <StateBuilderCommit Condition="'$(StateBuilderCommit)' != 'unknown' and '$(_StateBuilderDirty.Trim())' != ''">$(StateBuilderCommit)-dirty</StateBuilderCommit>
-    </PropertyGroup>
-
-    <Warning Condition="'$(StateBuilderCommit)' == 'unknown'"
-             Text="Could not read the STS2MCP submodule commit; recordings will carry state_builder_commit=unknown." />
-    <Warning Condition="$(StateBuilderCommit.EndsWith('-dirty'))"
-             Text="vendor/STS2MCP has uncommitted changes; recordings will be stamped $(StateBuilderCommit). Fix bugs upstream in STS2MCP and update the submodule pin instead." />
-
-    <ItemGroup>
-      <AssemblyMetadata Include="StateBuilderCommit" Value="$(StateBuilderCommit)" />
-    </ItemGroup>
+  <!-- === State serializer presence ===========================================
+       Recordings no longer carry a state-serializer stamp: they carry the game
+       version the state was read out of, which the mod reads from the game at
+       load, plus this mod's own version. Neither needs a build step. -->
+  <Target Name="CheckStateBuilderSources" BeforeTargets="CoreCompile">
+    <Error Condition="!Exists('$(Sts2McpDir)/McpMod.StateBuilder.cs')"
+           Text="vendor/STS2MCP/McpMod.StateBuilder.cs is missing; the state serializer cannot be compiled. See vendor/README.md." />
   </Target>
 
 </Project>

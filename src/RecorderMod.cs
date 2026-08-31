@@ -5,6 +5,7 @@ using System.IO;
 using System.Reflection;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Debug;
 using MegaCrit.Sts2.Core.Modding;
 using STS2_Recorder.Config;
 using STS2_Recorder.Diagnostics;
@@ -24,7 +25,7 @@ namespace STS2_Recorder;
 ///      code is exception-guarded; a failure loses recording fidelity, never the
 ///      player's progress.
 ///   2. Match STS2MCP's state output exactly, by compiling its serializer
-///      straight from the vendor/STS2MCP submodule (see vendor/README.md)
+///      from the sources vendored at vendor/STS2MCP (see vendor/README.md)
 ///      rather than reimplementing it.
 ///   3. Stay passive. This mod reads and observes; it never enqueues an action
 ///      or mutates game state.
@@ -37,8 +38,11 @@ public static class RecorderMod
     /// <summary>Version, stamped from mod_manifest.json at build time.</summary>
     internal static readonly string Version = ResolveAssemblyVersion();
 
-    /// <summary>STS2MCP submodule commit the state serializer was built from.</summary>
-    internal static readonly string StateBuilderCommit = ResolveStateBuilderCommit();
+    /// <summary>
+    /// The game build being recorded, as the game names itself - "v0.107.1".
+    /// Read once: a run cannot span a game update.
+    /// </summary>
+    internal static readonly string GameVersion = ResolveGameVersion();
 
     private static RecorderConfig? _config;
     private static TrajectoryWriter? _writer;
@@ -71,8 +75,12 @@ public static class RecorderMod
             ApplyHarmonyPatches();
             ConnectFrameCallback();
 
-            Log.Info($"v{Version} recording to {_config.OutputDir}");
-            Log.Info($"State serializer built from STS2MCP @ {Shorten(StateBuilderCommit)}");
+            // The build stamp, not just the version: the version only moves on a
+            // release, so it cannot tell a freshly installed DLL from the one it
+            // was meant to replace. An install that silently did not take looks
+            // exactly like a fix that did not work.
+            Log.Info($"v{Version} (built {BuildTime()}) recording to {_config.OutputDir}");
+            Log.Info($"Recording game {GameVersion}");
         }
         catch (Exception ex)
         {
@@ -141,7 +149,7 @@ public static class RecorderMod
             new RunMeta(),
             DateTime.UtcNow,
             Version,
-            StateBuilderCommit);
+            GameVersion);
 
         Log.Info($"Recording a new run to {Session.FileName} (id pending first save)");
     }
@@ -250,8 +258,14 @@ public static class RecorderMod
     /// how hooks pass on actions that are not a player decision. Building the
     /// state is not cheap, so it happens only once a session is known to be
     /// listening.
+    ///
+    /// Returns whether a step was appended, which is what lets a hook that may
+    /// have to take its own step back know it has one to take back.
     /// </summary>
-    internal static void RecordAction(Func<Dictionary<string, object?>?, RecordedAction?> describe) =>
+    internal static bool RecordAction(Func<Dictionary<string, object?>?, RecordedAction?> describe)
+    {
+        bool recorded = false;
+
         Log.Guard("Record action", () =>
         {
             if (Session is not { IsClosed: false } session) return;
@@ -262,7 +276,11 @@ public static class RecorderMod
             if (action == null) return;
 
             session.RecordStep(state, action);
+            recorded = true;
         });
+
+        return recorded;
+    }
 
     /// <summary>
     /// Drops the last recorded step if it recorded <paramref name="action"/>,
@@ -291,18 +309,54 @@ public static class RecorderMod
         return typeof(RecorderMod).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
     }
 
-    private static string ResolveStateBuilderCommit()
+    /// <summary>
+    /// When the loaded DLL was built, for telling one install from the next.
+    /// Degrades to "unknown" rather than failing: this is a diagnostic.
+    /// </summary>
+    private static string BuildTime()
     {
-        foreach (var attr in typeof(RecorderMod).Assembly
-                     .GetCustomAttributes<AssemblyMetadataAttribute>())
+        try
         {
-            if (attr.Key == "StateBuilderCommit" && !string.IsNullOrEmpty(attr.Value))
-                return attr.Value;
-        }
+            string path = typeof(RecorderMod).Assembly.Location;
 
-        return "unknown";
+            return string.IsNullOrEmpty(path)
+                ? "unknown"
+                : File.GetLastWriteTime(path).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not read the build time: {ex.Message}");
+            return "unknown";
+        }
     }
 
-    private static string Shorten(string commit) =>
-        commit.Length > 7 ? commit[..7] : commit;
+    /// <summary>
+    /// The game's own version string, off the release info it ships beside the
+    /// executable - the same value the game shows for itself, rather than an
+    /// assembly version that would drift from how anyone refers to a build.
+    ///
+    /// Degrades to "unknown" rather than throwing: a run recorded without a
+    /// version is worth more than no recording, and the field says plainly that
+    /// it could not be read.
+    /// </summary>
+    private static string ResolveGameVersion()
+    {
+        try
+        {
+            string? version = ReleaseInfoManager.Instance?.ReleaseInfo?.Version;
+
+            if (string.IsNullOrEmpty(version))
+            {
+                Log.Warn("The game did not report a version; recordings will carry game_version=unknown.");
+                return "unknown";
+            }
+
+            return version;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not read the game version: {ex.Message}");
+            return "unknown";
+        }
+    }
 }

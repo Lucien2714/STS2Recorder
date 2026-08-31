@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
+using STS2_Recorder.Capture;
 using STS2_Recorder.Diagnostics;
 using STS2_Recorder.Recording;
 
@@ -145,9 +146,15 @@ internal static class RunContext
     /// recorded object is identical to its <c>GET /api/v1/singleplayer</c>
     /// response. Returns null if the snapshot fails, which is recorded as a step
     /// with no state rather than dropping the action.
+    ///
+    /// Held inside <see cref="PassiveCapture"/> for its whole span: the
+    /// serializer opens screens where an agent would need one open, and a
+    /// recording must observe the run without touching it.
     /// </summary>
     internal static Dictionary<string, object?>? CaptureState()
     {
+        PassiveCapture.Enter();
+
         try
         {
             return STS2_MCP.McpMod.CaptureSingleplayerState();
@@ -156,6 +163,10 @@ internal static class RunContext
         {
             Log.Error("State capture failed; recording this step without state", ex);
             return null;
+        }
+        finally
+        {
+            PassiveCapture.Exit();
         }
     }
 }

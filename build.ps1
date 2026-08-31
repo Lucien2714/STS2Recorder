@@ -67,14 +67,13 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# --- Sanity-check the STS2MCP submodule ---------------------------------------
+# --- Sanity-check the vendored STS2MCP sources --------------------------------
 
 if (-not (Test-Path (Join-Path $scriptDir 'vendor/STS2MCP/McpMod.StateBuilder.cs'))) {
     Write-Host @"
-ERROR: the STS2MCP submodule at vendor/STS2MCP is not checked out, so the state
-serializer this mod compiles is missing.
-
-  git submodule update --init --recursive
+ERROR: vendor/STS2MCP/McpMod.StateBuilder.cs is missing, so the state serializer
+this mod compiles is not there. It is vendored in this repo, not fetched - see
+vendor/README.md.
 "@ -ForegroundColor Red
     exit 1
 }
@@ -99,18 +98,35 @@ Write-Host "=== Build succeeded ===" -ForegroundColor Green
 
 # --- Install -------------------------------------------------------------------
 
+# The game loads a mod from its own folder under mods/, alongside a
+# mod_manifest.json - not from a loose DLL in mods/ itself. Installing to the
+# wrong shape is silent: the game keeps running whatever is in the folder, so a
+# fix can look installed and never load. STS2_Recorder.conf lives here too and
+# is the player's, so it is never touched.
 if ($Install) {
-    $modsDir = Join-Path $GameDir 'mods'
-    New-Item -ItemType Directory -Force -Path $modsDir | Out-Null
+    $modDir = Join-Path $GameDir 'mods/STS2Recorder'
+    New-Item -ItemType Directory -Force -Path $modDir | Out-Null
 
-    Copy-Item (Join-Path $outDir 'STS2_Recorder.dll') $modsDir -Force
-    Copy-Item (Join-Path $scriptDir 'mod_manifest.json') (Join-Path $modsDir 'STS2_Recorder.json') -Force
+    $dll = Join-Path $outDir 'STS2_Recorder.dll'
 
-    Write-Host "Installed to $modsDir" -ForegroundColor Green
+    try {
+        Copy-Item $dll (Join-Path $modDir 'STS2_Recorder.dll') -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Host "ERROR: could not replace the installed DLL. Close Slay the Spire 2 and re-run." -ForegroundColor Red
+        Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+
+    Copy-Item (Join-Path $scriptDir 'mod_manifest.json') (Join-Path $modDir 'mod_manifest.json') -Force
+
+    $installed = Get-Item (Join-Path $modDir 'STS2_Recorder.dll')
+    Write-Host "Installed to $modDir" -ForegroundColor Green
+    Write-Host ("  STS2_Recorder.dll  {0:yyyy-MM-dd HH:mm:ss}  {1:N0} bytes" -f $installed.LastWriteTime, $installed.Length)
 } else {
-    Write-Host "To install, copy these files to <game_install>\mods\:"
+    Write-Host "To install, copy these into <game_install>\mods\STS2Recorder\:"
     Write-Host "  $outDir\STS2_Recorder.dll"
-    Write-Host "  $scriptDir\mod_manifest.json  ->  mods\STS2_Recorder.json"
+    Write-Host "  $scriptDir\mod_manifest.json"
     Write-Host ""
     Write-Host "Or re-run with -Install."
 }

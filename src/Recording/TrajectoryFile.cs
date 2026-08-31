@@ -13,18 +13,28 @@ namespace STS2_Recorder.Recording;
 /// </summary>
 internal sealed class TrajectoryFile
 {
-    /// <summary>Incremented on any breaking change to this shape.</summary>
-    public int SchemaVersion { get; init; } = 1;
+    /// <summary>
+    /// Incremented on any breaking change to this shape.
+    ///
+    /// 2: dropped <c>state_builder_commit</c> for <c>game_version</c>.
+    /// </summary>
+    public int SchemaVersion { get; init; } = 2;
 
     /// <summary>Version of this mod, from mod_manifest.json via the assembly.</summary>
     public string RecorderVersion { get; init; } = "";
 
     /// <summary>
-    /// The STS2MCP commit whose <c>BuildGameState()</c> produced every
-    /// <see cref="TrajectoryStep.State"/> below. Without this a dataset
-    /// collected across a schema change is uninterpretable.
+    /// The game build every <see cref="TrajectoryStep.State"/> below was read
+    /// out of, as the game names itself - "v0.107.1".
+    ///
+    /// The state is a picture of the game's own model, so what a recorded field
+    /// means is set by the game version first and foremost: cards get reworked,
+    /// rooms get added, fields come and go. Without this, a dataset collected
+    /// across a game update cannot be read honestly, and nothing else in the
+    /// file can stand in for it - a mod version does not move when the game
+    /// updates underneath it. <c>"unknown"</c> if the game does not say.
     /// </summary>
-    public string StateBuilderCommit { get; init; } = "";
+    public string GameVersion { get; init; } = "";
 
     /// <summary>
     /// Stable per-run identifier - the run's start time in epoch seconds - which
