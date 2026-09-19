@@ -17,6 +17,11 @@ internal sealed class TrajectoryFile
     /// Incremented on any breaking change to this shape.
     ///
     /// 2: dropped <c>state_builder_commit</c> for <c>game_version</c>.
+    ///
+    /// Not bumped for <c>player_detail</c>: a step gained a key, and a consumer
+    /// that ignores keys it does not know still reads these files. What tells
+    /// the two apart is <see cref="RecorderVersion"/>, which the vendored-source
+    /// rules already require bumping.
     /// </summary>
     public int SchemaVersion { get; init; } = 2;
 
@@ -112,6 +117,23 @@ internal sealed class TrajectoryStep
     /// result. Identical in shape to STS2MCP's <c>GET /api/v1/singleplayer</c>.
     /// </summary>
     public Dictionary<string, object?>? State { get; init; }
+
+    /// <summary>
+    /// Verbatim <c>BuildPlayerDetail()</c> output for the same moment as
+    /// <see cref="State"/>, identical in shape to STS2MCP's
+    /// <c>GET /api/v1/player</c>: vitals, gold, relics, potions, and the master
+    /// deck.
+    ///
+    /// It is here because <see cref="State"/> cannot answer what the deck is.
+    /// A game state carries the combat piles, and mid-combat those hold copies
+    /// dealt for that fight rather than the run's own cards; outside combat it
+    /// carries no card list at all. So without this, a recording of a
+    /// deckbuilding game never records the deck - and the shape of the deck is
+    /// what most of these decisions are about.
+    ///
+    /// Null outside a run and when the snapshot failed.
+    /// </summary>
+    public Dictionary<string, object?>? PlayerDetail { get; init; }
 
     /// <summary>
     /// What the player did. Null only on the terminal step, which records the

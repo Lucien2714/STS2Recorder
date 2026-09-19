@@ -9,16 +9,20 @@ namespace STS2_Recorder.Capture;
 /// Identifies a card in its own right, for the <c>subject</c> of a step that
 /// acted on one.
 ///
-/// An index alone does not say what a card was, and neither does the recorded
-/// state's entry for it. STS2MCP records a card's id, name, type, cost, rarity
-/// and an upgraded flag - everything a card is *printed* with - and nothing at
-/// all about what a run has since done to it. Two Strikes in the same hand can
-/// differ in how far they are upgraded, what they are enchanted with, what
-/// afflicts them, and whether they are real deck cards or copies conjured for
-/// one combat, and the state calls all of them "Strike, upgraded".
+/// An index alone does not say what a card was, and the recorded state's entry
+/// for it only goes so far. STS2MCP records what a card is *printed* with - id,
+/// name, type, cost, rarity - plus, since the vendored serializer was re-synced
+/// for recorder 0.2.0, its upgrade level and ceiling and which enchantment or
+/// affliction it carries. What the state still does not say is how strong that
+/// enchantment is, or whether the card is a real deck card at all: two Strikes
+/// in the same hand can differ in the size of the same enchantment, and one of
+/// them can be a copy conjured for a single combat, and the state prints both
+/// the same.
 ///
-/// So this carries exactly what the state cannot: everything about a card that
-/// a run changed after it was printed.
+/// So this carries what the state cannot - `amount`, `is_clone`, `is_dupe`,
+/// `floor_added_to_deck` - alongside the identity fields, which are repeated
+/// here rather than looked up so a subject reads on its own. Keep the overlap
+/// spelled the same as the state's: the two are read side by side.
 /// </summary>
 internal static class CardIdentity
 {

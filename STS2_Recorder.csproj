@@ -25,8 +25,8 @@
     <!-- Where vendor/STS2MCP was copied from. Documentation, not a build input:
          nothing reads these but a person re-syncing the copy, who should update
          both. See vendor/README.md. -->
-    <Sts2McpUpstreamCommit>2b89ea2ffd65bcf0202aaa8b632a62113a359add</Sts2McpUpstreamCommit>
-    <Sts2McpUpstreamRef>Lucien2714/STS2MCP@feat/custom-run</Sts2McpUpstreamRef>
+    <Sts2McpUpstreamCommit>e759570b11f7935a6dda5adb9cd5d29be490c9a6</Sts2McpUpstreamCommit>
+    <Sts2McpUpstreamRef>Lucien2714/STS2MCP@feat/post-action-state</Sts2McpUpstreamRef>
   </PropertyGroup>
 
   <!-- === Game assembly references ============================================
@@ -66,7 +66,7 @@
        decision someone made, not something a wildcard swept in. -->
   <ItemGroup>
     <Compile Include="src/**/*.cs" />
-    <Compile Include="$(Sts2McpDir)/McpMod.StateBuilder.cs;$(Sts2McpDir)/McpMod.Helpers.cs;$(Sts2McpDir)/McpMod.StateBuilderSupport.cs">
+    <Compile Include="$(Sts2McpDir)/McpMod.StateBuilder.cs;$(Sts2McpDir)/McpMod.PlayerDetail.cs;$(Sts2McpDir)/McpMod.Helpers.cs;$(Sts2McpDir)/McpMod.StateBuilderSupport.cs">
       <Link>STS2MCP/%(Filename)%(Extension)</Link>
       <Visible>true</Visible>
     </Compile>
@@ -79,6 +79,8 @@
   <Target Name="CheckStateBuilderSources" BeforeTargets="CoreCompile">
     <Error Condition="!Exists('$(Sts2McpDir)/McpMod.StateBuilder.cs')"
            Text="vendor/STS2MCP/McpMod.StateBuilder.cs is missing; the state serializer cannot be compiled. See vendor/README.md." />
+    <Error Condition="!Exists('$(Sts2McpDir)/McpMod.PlayerDetail.cs')"
+           Text="vendor/STS2MCP/McpMod.PlayerDetail.cs is missing; the master deck cannot be recorded. See vendor/README.md." />
   </Target>
 
 </Project>

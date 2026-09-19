@@ -1,12 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using MegaCrit.Sts2.Core.Entities.Ancients;
+using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.Models;
@@ -463,11 +469,7 @@ public static partial class McpMod
         else if (topOverlay is NGameOverScreen gameOverScreen)
         {
             result["state_type"] = "game_over";
-            result["game_over"] = new Dictionary<string, object?>
-            {
-                ["message"] = "Run ended.",
-                ["options"] = new List<string> { "main_menu" }
-            };
+            result["game_over"] = BuildGameOverState(gameOverScreen, runState);
         }
         else if (topOverlay is IOverlayScreen
                  && topOverlay is not NRewardsScreen
@@ -629,6 +631,58 @@ public static partial class McpMod
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Game-over summary. NGameOverScreen resolves the run's RunHistory in
+    /// _Ready (falling back to a synthesized one carrying the victory-room
+    /// flag when RunManager has none), so read the screen's own copy and mirror
+    /// its fallbacks. Outcome mirrors the game's GameOverType mapping: a win
+    /// wins over everything else, then abandon, then the death that ended it.
+    /// </summary>
+    private static Dictionary<string, object?> BuildGameOverState(NGameOverScreen gameOverScreen, RunState runState)
+    {
+        var history = GetInstanceFieldValue(gameOverScreen, "_history") as RunHistory
+                      ?? RunManager.Instance?.History;
+        var victory = history?.Win ?? (runState.CurrentRoom?.IsVictoryRoom ?? false);
+
+        string outcome;
+        string? killedBy = null;
+        if (victory)
+        {
+            outcome = "victory";
+        }
+        else if (history == null)
+        {
+            outcome = "unknown";
+        }
+        else if (history.WasAbandoned)
+        {
+            outcome = "abandoned";
+        }
+        else if (history.KilledByEncounter != ModelId.none)
+        {
+            outcome = "combat_death";
+            killedBy = history.KilledByEncounter.Entry;
+        }
+        else if (history.KilledByEvent != ModelId.none)
+        {
+            outcome = "event_death";
+            killedBy = history.KilledByEvent.Entry;
+        }
+        else
+        {
+            outcome = "unknown";
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["message"] = victory ? "Run ended in victory." : "Run ended.",
+            ["victory"] = victory,
+            ["outcome"] = outcome,
+            ["killed_by"] = killedBy,
+            ["options"] = new List<string> { "main_menu" }
+        };
     }
 
     private static void AddCharacterSelectMenuState(
@@ -1344,7 +1398,16 @@ public static partial class McpMod
         // Powers (status effects)
         state["status"] = BuildPowersState(creature);
 
-        // Relics
+        state["relics"] = BuildRelicsList(player);
+        state["potions"] = BuildPotionsList(player);
+        state["max_potion_slots"] = player.MaxPotionCount;
+
+        return state;
+    }
+
+    // Shared by the state endpoints' player object and GET /api/v1/player.
+    private static List<Dictionary<string, object?>> BuildRelicsList(Player player)
+    {
         var relics = new List<Dictionary<string, object?>>();
         foreach (var relic in player.Relics)
         {
@@ -1357,9 +1420,12 @@ public static partial class McpMod
                 ["keywords"] = BuildHoverTips(relic.HoverTipsExcludingRelic)
             });
         }
-        state["relics"] = relics;
+        return relics;
+    }
 
-        // Potions
+    // Empty slots are skipped, so "slot" stays the index the use_potion action wants.
+    private static List<Dictionary<string, object?>> BuildPotionsList(Player player)
+    {
         var potions = new List<Dictionary<string, object?>>();
         int slotIndex = 0;
         foreach (var potion in player.PotionSlots)
@@ -1379,10 +1445,7 @@ public static partial class McpMod
             }
             slotIndex++;
         }
-        state["potions"] = potions;
-        state["max_potion_slots"] = player.MaxPotionCount;
-
-        return state;
+        return potions;
     }
 
     private static string GetCostDisplay(CardModel card)
@@ -1411,7 +1474,14 @@ public static partial class McpMod
             ["description"] = SafeGetCardDescription(card, pile),
             ["rarity"] = card.Rarity.ToString(),
             ["is_upgraded"] = card.IsUpgraded,
-            ["keywords"] = BuildHoverTips(card.HoverTips)
+            // Field name matches the wiki endpoint's already-shipped
+            // current_upgrade_level rather than introducing a second spelling.
+            ["current_upgrade_level"] = card.CurrentUpgradeLevel,
+            ["max_upgrade_level"] = card.MaxUpgradeLevel,
+            ["is_upgradable"] = card.IsUpgradable,
+            ["enchantment"] = BuildEnchantmentInfo(card.Enchantment),
+            ["affliction"] = BuildAfflictionInfo(card.Affliction),
+            ["keywords"] = BuildHoverTips(SafeGetHoverTips(card))
         };
     }
 
@@ -1466,14 +1536,10 @@ public static partial class McpMod
         var list = new List<Dictionary<string, object?>>();
         foreach (var card in cards)
         {
-            // Pile cards only need a subset - keep it lightweight
-            list.Add(new Dictionary<string, object?>
-            {
-                ["name"] = SafeGetText(() => card.Title),
-                ["cost"] = GetCostDisplay(card),
-                ["star_cost"] = GetStarCostDisplay(card),
-                ["description"] = SafeGetCardDescription(card, pile)
-            });
+            // Same shape as a hand card minus the hand-only fields (index,
+            // target_type, can_play), so identity, upgrade level and enchantment
+            // are readable wherever a card shows up.
+            list.Add(BuildCardInfo(card, pile));
         }
         return list;
     }
@@ -1538,7 +1604,11 @@ public static partial class McpMod
     {
         var state = new Dictionary<string, object?>();
 
-        var eventModel = eventRoom.CanonicalEvent;
+        // LocalMutableEvent is the per-run mutable copy and carries the resolved
+        // Description; CanonicalEvent is the shared template whose Description is
+        // empty, so reading it there left `body` null. Same pattern as
+        // BuildFakeMerchantState below.
+        var eventModel = eventRoom.LocalMutableEvent ?? eventRoom.CanonicalEvent;
         bool isAncient = eventModel is AncientEventModel;
         state["event_id"] = eventModel.Id.Entry;
         state["event_name"] = SafeGetText(() => eventModel.Title);
@@ -1554,12 +1624,23 @@ public static partial class McpMod
             {
                 var hitbox = ancientLayout.GetNodeOrNull<NClickableControl>("%DialogueHitbox");
                 inDialogue = hitbox != null && hitbox.Visible && hitbox.IsEnabled;
+
+                // Without this the agent clicks through ancient dialogue blind:
+                // in_dialogue said "keep clicking" but nothing carried what was said.
+                var dialogue = BuildAncientDialogueState(ancientLayout);
+                if (dialogue != null)
+                    state["dialogue"] = dialogue;
             }
         }
         state["in_dialogue"] = inDialogue;
 
         // Event body text
         state["body"] = SafeGetText(() => eventModel.Description);
+
+        // True once every remaining option is the "leave" one - the agent can stop
+        // looking for a meaningful choice. The proceed option itself is still listed
+        // below with is_proceed set.
+        state["is_finished"] = eventModel.IsFinished;
 
         // Options from UI
         var options = new List<Dictionary<string, object?>>();
@@ -1573,18 +1654,38 @@ public static partial class McpMod
                 var optData = new Dictionary<string, object?>
                 {
                     ["index"] = index,
+                    // Locale-independent identity for the option, e.g.
+                    // "TRASH_HEAP.pages.INITIAL.options.DIVE_IN". title/description are
+                    // localized display text and change with the player's language;
+                    // text_key does not, so match on this rather than parsing prose.
+                    ["text_key"] = string.IsNullOrEmpty(opt.TextKey) ? null : opt.TextKey,
                     ["title"] = SafeGetText(() => opt.Title),
                     ["description"] = SafeGetText(() => opt.Description),
                     ["is_locked"] = opt.IsLocked,
                     ["is_proceed"] = opt.IsProceed,
                     ["was_chosen"] = opt.WasChosen
                 };
+                // The game's own lethality check for this option. Absent when the
+                // option carries no such predicate, false when it is survivable at the
+                // player's current HP - so null and false mean different things.
+                optData["will_kill_player"] = EvaluateWillKillPlayer(opt, runState);
+                // Numbers this option's own text interpolates, e.g. { "hp_loss": 8 }.
+                // Omitted when the option's effect is not expressed as a number.
+                var optEffects = BuildOptionEffects(opt);
+                if (optEffects.Count > 0)
+                    optData["effects"] = optEffects;
                 if (opt.Relic != null)
                 {
                     optData["relic_name"] = SafeGetText(() => opt.Relic.Title);
                     optData["relic_description"] = SafeGetText(() => opt.Relic.DynamicDescription);
                 }
                 optData["keywords"] = BuildHoverTips(opt.HoverTips);
+                // Cards the option's tips point at (a curse it grants, a card it adds).
+                // keywords flattens those to name + description; this keeps the full
+                // card so the agent can judge cost, type and rarity.
+                var optCards = BuildOptionCards(opt.HoverTips);
+                if (optCards.Count > 0)
+                    optData["cards"] = optCards;
                 options.Add(optData);
                 index++;
             }
@@ -1592,6 +1693,150 @@ public static partial class McpMod
         state["options"] = options;
 
         return state;
+    }
+
+    /// <summary>
+    /// Runs the option's own WillKillPlayer predicate against the local player.
+    /// Returns null when the option defines no predicate (most options) so callers can
+    /// tell "not lethal" apart from "the game never claimed either way".
+    /// </summary>
+    private static bool? EvaluateWillKillPlayer(EventOption opt, RunState runState)
+    {
+        try
+        {
+            var predicate = opt.WillKillPlayer;
+            if (predicate == null) return null;
+            var me = LocalContext.GetMe(runState);
+            return me != null ? predicate(me) : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// The ancient's dialogue as it stands on screen. Only lines already revealed are
+    /// returned - the layout holds the whole script, and reporting unrevealed lines
+    /// would show the agent text the player cannot see yet.
+    /// </summary>
+    private static Dictionary<string, object?>? BuildAncientDialogueState(NAncientEventLayout layout)
+    {
+        try
+        {
+            if (GetInstanceFieldValue(layout, "_dialogue") is not IReadOnlyList<AncientDialogueLine> lines
+                || lines.Count == 0)
+                return null;
+
+            var currentLine = GetInstanceFieldValue(layout, "_currentDialogueLine") as int? ?? 0;
+            var revealed = Math.Clamp(currentLine + 1, 0, lines.Count);
+
+            var shown = new List<Dictionary<string, object?>>();
+            for (var i = 0; i < revealed; i++)
+            {
+                shown.Add(new Dictionary<string, object?>
+                {
+                    ["index"] = i,
+                    ["speaker"] = lines[i].Speaker.ToString(),
+                    ["text"] = SafeGetText(() => lines[i].LineText)
+                });
+            }
+
+            return new Dictionary<string, object?>
+            {
+                ["current_line"] = currentLine,
+                ["total_lines"] = lines.Count,
+                ["lines"] = shown
+            };
+        }
+        catch { return null; }
+    }
+
+    // Matches a localization placeholder such as "{HpLoss}" or "{Gold:N0}".
+    private static readonly Regex LocPlaceholderPattern =
+        new(@"\{(\w+)(?::[^}]*)?\}", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Splits the event's shared variable pool down to the numbers a single option
+    /// actually talks about.
+    ///
+    /// Every option's LocString carries the whole event's variable set - the "lose HP"
+    /// option is handed the event's Gold var too - so the set alone cannot say what an
+    /// option does. The option's own raw (pre-substitution) text can: it names the
+    /// placeholders it interpolates. Keying off those, and off numeric DynamicVars only,
+    /// leaves just this option's numbers.
+    ///
+    /// Effects with no number in the text (removing a card, gaining a random relic) have
+    /// no placeholder and so appear nowhere here. This is a hint, not a complete
+    /// description of the option - text_key and description remain authoritative.
+    /// </summary>
+    private static Dictionary<string, object?> BuildOptionEffects(EventOption opt)
+    {
+        var effects = new Dictionary<string, object?>();
+        CollectLocStringEffects(opt.Title, effects);
+        CollectLocStringEffects(opt.Description, effects);
+        return effects;
+    }
+
+    private static void CollectLocStringEffects(LocString? loc, Dictionary<string, object?> effects)
+    {
+        if (loc == null) return;
+        try
+        {
+            var vars = loc.Variables;
+            if (vars == null || vars.Count == 0) return;
+            var raw = loc.GetRawText();
+            if (string.IsNullOrEmpty(raw)) return;
+            foreach (Match match in LocPlaceholderPattern.Matches(raw))
+            {
+                var name = match.Groups[1].Value;
+                // String vars (character, pronounSubject, ...) are prose, not effects.
+                if (!vars.TryGetValue(name, out var value) || value is not DynamicVar dynamicVar)
+                    continue;
+                try { effects[ToSnakeCase(name)] = dynamicVar.IntValue; }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    // Dictionary keys bypass _jsonOptions' PropertyNamingPolicy, so var names arrive
+    // PascalCase and have to be converted here to match the rest of the JSON.
+    private static string ToSnakeCase(string name)
+    {
+        var sb = new StringBuilder(name.Length + 4);
+        for (int i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+            if (char.IsUpper(c))
+            {
+                if (i > 0 && (!char.IsUpper(name[i - 1]) || (i + 1 < name.Length && !char.IsUpper(name[i + 1]))))
+                    sb.Append('_');
+                sb.Append(char.ToLowerInvariant(c));
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Extracts the full card behind every CardHoverTip on an event option.
+    /// </summary>
+    private static List<Dictionary<string, object?>> BuildOptionCards(IEnumerable<IHoverTip>? tips)
+    {
+        var cards = new List<Dictionary<string, object?>>();
+        if (tips == null) return cards;
+        try
+        {
+            foreach (var tip in tips)
+            {
+                if (tip is not CardHoverTip cardTip || cardTip.Card == null) continue;
+                try { cards.Add(BuildCardInfo(cardTip.Card)); }
+                catch { }
+            }
+        }
+        catch { }
+        return cards;
     }
 
     private static Dictionary<string, object?> BuildFakeMerchantState(EventRoom eventRoom, RunState runState)
@@ -1644,7 +1889,9 @@ public static partial class McpMod
         if (fakeMerchantNode != null)
         {
             var proceedButton = FindFirst<NProceedButton>(fakeMerchantNode);
-            shopState["can_proceed"] = proceedButton?.IsEnabled ?? false;
+            var inventoryUI = FindFirst<NMerchantInventory>(fakeMerchantNode);
+            shopState["can_proceed"] = CanProceedFromMerchant(proceedButton, inventoryUI);
+            shopState["inventory_open"] = inventoryUI?.IsOpen ?? false;
         }
         else
         {
@@ -1668,6 +1915,7 @@ public static partial class McpMod
 
         var items = new List<Dictionary<string, object?>>();
         int index = 0;
+        var player = inventory.Player;
 
         // FakeMerchant only sells relics (no cards, potions, or card removal)
         foreach (var entry in inventory.RelicEntries)
@@ -1680,6 +1928,7 @@ public static partial class McpMod
                 ["is_stocked"] = entry.IsStocked,
                 ["can_afford"] = entry.EnoughGold
             };
+            AddPurchasability(item, entry, player);
             if (entry.Model is { } relic)
             {
                 item["relic_id"] = relic.Id.Entry;
@@ -1729,7 +1978,9 @@ public static partial class McpMod
         if (inventory == null)
         {
             state["items"] = new List<Dictionary<string, object?>>();
-            state["can_proceed"] = NMerchantRoom.Instance?.ProceedButton?.IsEnabled ?? false;
+            state["can_proceed"] = CanProceedFromMerchant(
+                NMerchantRoom.Instance?.ProceedButton, NMerchantRoom.Instance?.Inventory);
+            state["inventory_open"] = NMerchantRoom.Instance?.Inventory?.IsOpen ?? false;
             state["error"] =
                 "Shop inventory is not ready yet (null). Often happens right after entering the merchant from the map; retry in a moment.";
             return state;
@@ -1737,6 +1988,7 @@ public static partial class McpMod
 
         var items = new List<Dictionary<string, object?>>();
         int index = 0;
+        var player = inventory.Player;
 
         // Cards
         foreach (var entry in inventory.CardEntries)
@@ -1750,6 +2002,7 @@ public static partial class McpMod
                 ["can_afford"] = entry.EnoughGold,
                 ["on_sale"] = entry.IsOnSale
             };
+            AddPurchasability(item, entry, player);
             if (entry.CreationResult?.Card is { } card)
             {
                 var cardInfo = BuildCardInfo(card);
@@ -1777,6 +2030,7 @@ public static partial class McpMod
                 ["is_stocked"] = entry.IsStocked,
                 ["can_afford"] = entry.EnoughGold
             };
+            AddPurchasability(item, entry, player);
             if (entry.Model is { } relic)
             {
                 item["relic_id"] = relic.Id.Entry;
@@ -1799,6 +2053,7 @@ public static partial class McpMod
                 ["is_stocked"] = entry.IsStocked,
                 ["can_afford"] = entry.EnoughGold
             };
+            AddPurchasability(item, entry, player);
             if (entry.Model is { } potion)
             {
                 item["potion_id"] = potion.Id.Entry;
@@ -1813,22 +2068,114 @@ public static partial class McpMod
         // Card removal
         if (inventory.CardRemovalEntry is { } removal)
         {
-            items.Add(new Dictionary<string, object?>
+            var removalItem = new Dictionary<string, object?>
             {
                 ["index"] = index,
                 ["category"] = "card_removal",
                 ["price"] = removal.Cost,
                 ["is_stocked"] = removal.IsStocked,
                 ["can_afford"] = removal.EnoughGold
-            });
+            };
+            AddPurchasability(removalItem, removal, player);
+            items.Add(removalItem);
         }
 
         state["items"] = items;
 
-        var proceedButton = NMerchantRoom.Instance?.ProceedButton;
-        state["can_proceed"] = proceedButton?.IsEnabled ?? false;
+        state["can_proceed"] = CanProceedFromMerchant(
+            NMerchantRoom.Instance?.ProceedButton, NMerchantRoom.Instance?.Inventory);
+        state["inventory_open"] = NMerchantRoom.Instance?.Inventory?.IsOpen ?? false;
 
         return state;
+    }
+
+    /// <summary>
+    /// Stamps <c>can_purchase</c> (and <c>purchase_blocked_reason</c> when blocked) onto a
+    /// shop item dict. <c>is_stocked</c>/<c>can_afford</c> only cover the two checks
+    /// <see cref="MerchantEntry.OnTryPurchaseWrapper"/> makes up front; the per-category
+    /// purchase can still be refused further down (full potion belt, Sozu, nothing
+    /// removable in the deck). The game just shakes the slot on those, so surface the
+    /// reason instead of letting the agent burn a turn on a no-op purchase.
+    /// </summary>
+    private static void AddPurchasability(Dictionary<string, object?> item, MerchantEntry entry, Player player)
+    {
+        var reason = GetPurchaseBlockedReason(entry, player);
+        item["can_purchase"] = reason == null;
+        item["purchase_blocked_reason"] = reason;
+    }
+
+    /// <summary>
+    /// Why buying <paramref name="entry"/> right now would fail, or <c>null</c> if it
+    /// would go through. Mirrors the checks the purchase path itself makes:
+    /// <see cref="MerchantEntry.OnTryPurchaseWrapper"/> (stock, gold) plus each entry's
+    /// own <c>OnTryPurchase</c> — <c>PotionCmd.TryToProcure</c> for potions,
+    /// <c>CardPileCmd.Add</c>'s <c>ShouldAddToDeck</c> hook for cards, and the
+    /// removal selector's <c>IsRemovable</c> filter for card removal. Relics have no
+    /// extra gate. All of these are read-only queries.
+    /// </summary>
+    private static string? GetPurchaseBlockedReason(MerchantEntry entry, Player player)
+    {
+        if (!entry.IsStocked)
+            return "sold_out";
+        if (!entry.EnoughGold)
+            return "not_enough_gold";
+
+        switch (entry)
+        {
+            case MerchantPotionEntry potionEntry:
+                if (potionEntry.Model is { } potion
+                    && !Hook.ShouldProcurePotion(player.RunState, player.Creature.CombatState, potion, player))
+                    return "potions_forbidden";
+                if (!player.HasOpenPotionSlots)
+                    return "potion_slots_full";
+                return null;
+
+            case MerchantCardEntry cardEntry:
+                if (cardEntry.CreationResult?.Card is { } card
+                    && !Hook.ShouldAddToDeck(player.RunState, card, out _))
+                    return "cannot_add_to_deck";
+                return null;
+
+            case MerchantCardRemovalEntry:
+                if (!player.Deck.Cards.Any(c => c.IsRemovable))
+                    return "no_removable_cards";
+                return null;
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Human-readable form of a <see cref="GetPurchaseBlockedReason"/> code, for the
+    /// error a refused <c>shop_purchase</c> returns.
+    /// </summary>
+    private static string DescribePurchaseBlock(string reason, MerchantEntry entry, Player player) => reason switch
+    {
+        "sold_out" => "Item is sold out",
+        "not_enough_gold" => $"Not enough gold (need {entry.Cost}, have {player.Gold})",
+        "potions_forbidden" => "A relic prevents you from obtaining potions",
+        "potion_slots_full" => "All potion slots are full - use or discard a potion first",
+        "cannot_add_to_deck" => "Something prevents that card from being added to your deck",
+        "no_removable_cards" => "No removable cards in your deck",
+        _ => $"Purchase is not allowed right now ({reason})"
+    };
+
+    /// <summary>
+    /// Answers "can the agent call <c>proceed</c> right now?" rather than reporting the
+    /// raw button state. Reading shop state auto-opens the shopkeeper's inventory, and
+    /// both <c>NMerchantRoom.OpenInventory</c> and <c>NFakeMerchant.OpenInventory</c>
+    /// call <c>_proceedButton.Disable()</c> until <c>InventoryClosed</c> fires — so the
+    /// raw flag is false on essentially every shop read. <c>ExecuteProceed</c> closes the
+    /// inventory first (and <c>NMerchantInventory.Close</c> emits <c>InventoryClosed</c>
+    /// synchronously, re-enabling the button in the same call stack), so an open
+    /// inventory does not actually block leaving the shop.
+    /// </summary>
+    private static bool CanProceedFromMerchant(NProceedButton? proceedButton, NMerchantInventory? inventory)
+    {
+        if (proceedButton == null)
+            return false;
+        return proceedButton.IsEnabled || inventory?.IsOpen == true;
     }
 
     private static Dictionary<string, object?> BuildMapState(RunState runState)
@@ -2070,7 +2417,10 @@ public static partial class McpMod
             state["prompt"] = prompt;
         }
 
-        // Cards in the grid (sorted by visual position - MoveToFront can reorder children)
+        // Cards in the grid (sorted by visual position - MoveToFront can reorder children).
+        // Picked cards stay in the grid, so flag them instead of making the agent
+        // remember what it already selected.
+        var selectedModels = GetSelectedCardModels(screen);
         var cardHolders = FindAllSortedByPosition<NGridCardHolder>(screen);
         var cards = new List<Dictionary<string, object?>>();
         int index = 0;
@@ -2081,10 +2431,19 @@ public static partial class McpMod
 
             var cardInfo = BuildCardInfo(card);
             cardInfo["index"] = index;
+            cardInfo["is_selected"] = selectedModels.Contains(card);
             cards.Add(cardInfo);
             index++;
         }
         state["cards"] = cards;
+
+        // How many cards are picked vs. how many the screen wants. MaxSelect can
+        // exceed what the grid holds ("select any number"), so clamp it to a number
+        // the agent can actually act on.
+        var (minSelect, maxSelect) = GetSelectionLimits(screen);
+        state["selected_count"] = selectedModels.Count;
+        state["min_select"] = minSelect;
+        state["max_select"] = maxSelect.HasValue ? (int?)Math.Min(maxSelect.Value, cards.Count) : null;
 
         // Preview container showing? (selection complete, awaiting confirm)
         // Upgrade screens use UpgradeSinglePreviewContainer / UpgradeMultiPreviewContainer
@@ -2172,10 +2531,18 @@ public static partial class McpMod
 
             var cardInfo = BuildCardInfo(card);
             cardInfo["index"] = index;
+            cardInfo["is_selected"] = false;
             cards.Add(cardInfo);
             index++;
         }
         state["cards"] = cards;
+
+        // Choose-a-card is one immediate pick - the screen resolves on click, so
+        // nothing is ever "already selected". Reported in the same shape as the grid
+        // screens so the agent branches on a single card_select contract.
+        state["selected_count"] = 0;
+        state["min_select"] = 1;
+        state["max_select"] = 1;
 
         var skipButton = screen.GetNodeOrNull<NClickableControl>("SkipButton");
         state["can_skip"] = skipButton?.IsEnabled == true && skipButton.Visible;
@@ -2271,6 +2638,7 @@ public static partial class McpMod
         }
 
         // Selectable cards (visible holders in the hand)
+        var selectedModels = GetSelectedCardModels(hand);
         var selectableCards = new List<Dictionary<string, object?>>();
         int index = 0;
         foreach (var holder in hand.ActiveHolders)
@@ -2281,32 +2649,54 @@ public static partial class McpMod
             var cardInfo = BuildCardInfo(card);
             cardInfo["index"] = index;
             cardInfo["description"] = SafeGetCardDescription(card); // hand cards use default pile
+            cardInfo["is_selected"] = selectedModels.Contains(card);
             selectableCards.Add(cardInfo);
             index++;
         }
         state["cards"] = selectableCards;
 
-        // Already-selected cards (in the SelectedHandCardContainer)
-        var selectedContainer = hand.GetNodeOrNull<Godot.Control>("%SelectedHandCardContainer");
-        if (selectedContainer != null)
+        // Already-selected cards. The hand's own _selectedCards is authoritative;
+        // fall back to the SelectedHandCardContainer holders if it is unreadable.
+        var selectedCards = new List<Dictionary<string, object?>>();
+        foreach (var model in selectedModels)
         {
-            var selectedCards = new List<Dictionary<string, object?>>();
-            var selectedHolders = FindAll<NSelectedHandCardHolder>(selectedContainer);
-            int selIdx = 0;
-            foreach (var holder in selectedHolders)
+            selectedCards.Add(new Dictionary<string, object?>
             {
-                var card = holder.CardModel;
-                if (card == null) continue;
-                selectedCards.Add(new Dictionary<string, object?>
-                {
-                    ["index"] = selIdx,
-                    ["name"] = SafeGetText(() => card.Title)
-                });
-                selIdx++;
-            }
-            if (selectedCards.Count > 0)
-                state["selected_cards"] = selectedCards;
+                ["index"] = selectedCards.Count,
+                ["name"] = SafeGetText(() => model.Title)
+            });
         }
+
+        if (selectedCards.Count == 0)
+        {
+            var selectedContainer = hand.GetNodeOrNull<Godot.Control>("%SelectedHandCardContainer");
+            if (selectedContainer != null)
+            {
+                foreach (var holder in FindAll<NSelectedHandCardHolder>(selectedContainer))
+                {
+                    var card = holder.CardModel;
+                    if (card == null) continue;
+                    selectedCards.Add(new Dictionary<string, object?>
+                    {
+                        ["index"] = selectedCards.Count,
+                        ["name"] = SafeGetText(() => card.Title)
+                    });
+                }
+            }
+        }
+
+        state["selected_count"] = selectedCards.Count;
+        if (selectedCards.Count > 0)
+            state["selected_cards"] = selectedCards;
+
+        // How many the prompt wants. Picked cards leave the hand for the selected
+        // container, so the ceiling is what is still selectable plus what is already
+        // picked - a guard against an unbounded MaxSelect, not a per-card rule.
+        var (minSelect, maxSelect) = GetSelectionLimits(hand);
+        state["min_select"] = minSelect;
+        state["max_select"] = maxSelect.HasValue
+            ? (int?)Math.Min(maxSelect.Value, selectableCards.Count + selectedCards.Count)
+            : null;
 
         // Confirm button state
         var confirmBtn = hand.GetNodeOrNull<NConfirmButton>("%SelectModeConfirmButton");

@@ -22,12 +22,13 @@ happen at compile time.
 
 ## What was copied, and why each file is here
 
-`STS2_Recorder.csproj` names these three files one at a time — the copy holds
+`STS2_Recorder.csproj` names these four files one at a time — the copy holds
 only what the serializer needs to compile, and nothing arrives here by wildcard:
 
 | File | Why it is here |
 |------|----------------|
 | `McpMod.StateBuilder.cs` | `BuildGameState()` itself. This is the file the recorder exists to share. |
+| `McpMod.PlayerDetail.cs` | `BuildPlayerDetail()`, the body behind `GET /api/v1/player`. The only place either project exposes the **master deck**: a game state carries the combat piles, and mid-combat those are copies dealt for that fight, so nothing in `BuildGameState()` says what the run's deck is. Carries one marked local edit — its HTTP handler is removed; see below. |
 | `McpMod.Helpers.cs` | The scene-tree and text helpers it is built on. The capture layer calls these too, so an index it records means the same thing as an index in the state beside it. |
 | `McpMod.StateBuilderSupport.cs` | **Not an upstream file.** Three members of `McpMod.Actions.cs` that `BuildGameState()` calls, lifted out verbatim. See below. |
 
@@ -35,7 +36,7 @@ Deliberately **not** copied:
 
 | Left behind | Why |
 |-------------|-----|
-| `McpMod.cs` | `HttpListener` + STS2MCP's own `[ModInitializer]`. The recorder must not open a port, and two `[ModInitializer]` classes in one DLL would both run. `src/McpModShim.cs` re-supplies the two members the rest of the class needs from it. |
+| `McpMod.cs` | `HttpListener` + STS2MCP's own `[ModInitializer]`. The recorder must not open a port, and two `[ModInitializer]` classes in one DLL would both run. `src/McpModShim.cs` re-supplies the members the rest of the class needs from it — the serializer options, and `IsMultiplayerRun()`, which `BuildPlayerDetail()` reports as `is_multiplayer`. |
 | `McpMod.Actions.cs` | The action executors. The recorder is passive and never invokes `ExecuteAction`, so all ~88 KB of it is code that cannot run here — and it drags in the two files below. Its three members that `BuildGameState()` does call live in `McpMod.StateBuilderSupport.cs` instead. Upstream is still the place to read for the action names and argument shapes the capture layer reproduces. |
 | `McpMod.Profile.cs`, `McpMod.Compendium.cs` | Only ever reached from `McpMod.Actions.cs`. |
 | `McpMod.SettingsUI.cs` | Harmony patches for STS2MCP's settings panel; the recorder must not alter game settings. |
@@ -74,14 +75,28 @@ Editing is now allowed — that is the point of the copy — but it is not free:
   is ours, but its bodies are upstream's, copied unchanged so they cannot drift.
   Re-copy them on a re-sync rather than editing them here.
 
+### Local edits currently carried
+
+| File | Edit |
+|------|------|
+| `McpMod.PlayerDetail.cs` | `HandleGetPlayerDetail` is removed. It is the HTTP entry point and needs `RunOnMainThread` / `SendJson` / `SendError` from `McpMod.cs`, and the recorder answers no requests. `BuildPlayerDetail()` below it — everything that actually reads the game — is verbatim, which is what lets a recorded `player_detail` claim to be what `GET /api/v1/player` would have returned. Its `using System.Net;` went with the handler. |
+
+`McpMod.StateBuilder.cs` and `McpMod.Helpers.cs` carry **no** local edits and are
+byte-identical to upstream at the commit below. Keep it that way if you can: the
+identical-output guarantee is cheapest to hold when there is nothing to re-apply.
+
 ## Provenance, and re-syncing
 
 `STS2_Recorder.csproj` records where the copy came from:
 
 ```xml
-<Sts2McpUpstreamCommit>2b89ea2ffd65bcf0202aaa8b632a62113a359add</Sts2McpUpstreamCommit>
-<Sts2McpUpstreamRef>Lucien2714/STS2MCP@feat/custom-run</Sts2McpUpstreamRef>
+<Sts2McpUpstreamCommit>e759570b11f7935a6dda5adb9cd5d29be490c9a6</Sts2McpUpstreamCommit>
+<Sts2McpUpstreamRef>Lucien2714/STS2MCP@feat/post-action-state</Sts2McpUpstreamRef>
 ```
+
+This is a real commit, so a re-sync can diff straight against it. The previous
+copy could not: it tracked that branch's *uncommitted working tree*, and named
+`2b89ea2` — the base those edits sat on, a commit that did not contain them.
 
 These are documentation, read by people rather than by the build. Recordings do
 not carry a serializer stamp: they carry `game_version` — the game build the

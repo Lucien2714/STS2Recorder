@@ -164,11 +164,12 @@ internal sealed class RecordingSession
         for (int i = 0; i < carried.Count; i++)
             Trajectory.Steps.Add(new TrajectoryStep
             {
-                Index   = Trajectory.Steps.Count,
-                T       = carried[i].T,
-                State   = carried[i].State,
-                Action  = carried[i].Action,
-                Resumed = i == 0 ? true : carried[i].Resumed
+                Index        = Trajectory.Steps.Count,
+                T            = carried[i].T,
+                State        = carried[i].State,
+                PlayerDetail = carried[i].PlayerDetail,
+                Action       = carried[i].Action,
+                Resumed      = i == 0 ? true : carried[i].Resumed
             });
 
         // With nothing carried over, the resume mark lands on the next step
@@ -182,20 +183,25 @@ internal sealed class RecordingSession
     }
 
     /// <summary>
-    /// Records a decision point. <paramref name="state"/> must have been
-    /// captured before the action took effect.
+    /// Records a decision point. <paramref name="state"/> and
+    /// <paramref name="playerDetail"/> must both have been captured before the
+    /// action took effect, and from the same moment as each other.
     /// </summary>
-    internal void RecordStep(Dictionary<string, object?>? state, RecordedAction? action)
+    internal void RecordStep(
+        Dictionary<string, object?>? state,
+        Dictionary<string, object?>? playerDetail,
+        RecordedAction? action)
     {
         if (IsClosed) return;
 
         Trajectory.Steps.Add(new TrajectoryStep
         {
-            Index   = Trajectory.Steps.Count,
-            T       = Timestamp(DateTime.UtcNow),
-            State   = state,
-            Action  = action,
-            Resumed = _pendingResumeMark ? true : null
+            Index        = Trajectory.Steps.Count,
+            T            = Timestamp(DateTime.UtcNow),
+            State        = state,
+            PlayerDetail = playerDetail,
+            Action       = action,
+            Resumed      = _pendingResumeMark ? true : null
         });
 
         _pendingResumeMark = false;
@@ -247,11 +253,15 @@ internal sealed class RecordingSession
     /// and an <paramref name="outcome"/>, while one merely left for the main
     /// menu has neither, and gets closed exactly as it stood.
     /// </summary>
-    internal void Close(Dictionary<string, object?>? finalState, RunOutcome? outcome)
+    internal void Close(
+        Dictionary<string, object?>? finalState,
+        Dictionary<string, object?>? finalPlayerDetail,
+        RunOutcome? outcome)
     {
         if (IsClosed) return;
 
-        if (finalState != null || outcome != null) RecordStep(finalState, action: null);
+        if (finalState != null || outcome != null)
+            RecordStep(finalState, finalPlayerDetail, action: null);
         Trajectory.Outcome = outcome;
         IsClosed = true;
         _dirty = true;

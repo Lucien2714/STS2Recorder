@@ -22,7 +22,10 @@ State serialization is not reimplemented here. Source files from
 `vendor/STS2MCP`, and its `BuildGameState()` is compiled straight into this mod,
 so a recorded `state` object is **identical** to what STS2MCP's
 `GET /api/v1/singleplayer` returns, and captured actions use the same names and
-argument shapes as its action API.
+argument shapes as its action API. Its `BuildPlayerDetail()` comes along too, so
+each step also carries a `player_detail` object identical to
+`GET /api/v1/player` — which is the only place either project exposes the
+**master deck**, since a game state only ever shows the combat piles.
 
 Practically, that means a recorded human run and an agent's run through the MCP
 server are the same data format. Every recording carries the game version it was
@@ -53,6 +56,7 @@ Early. What works today:
 - [x] Shop purchases (`shop_purchase`), merchant and fake merchant alike
 - [x] Card rewards (`select_card_reward`), relic skips, and in-combat hand
       selection (`combat_select_card`)
+- [x] The run's master deck beside every step, via STS2MCP's `player_detail`
 - [ ] Crystal Sphere
 
 ## Requirements

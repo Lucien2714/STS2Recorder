@@ -169,4 +169,42 @@ internal static class RunContext
             PassiveCapture.Exit();
         }
     }
+
+    /// <summary>
+    /// Snapshots run-level player detail using STS2MCP's own builder, so the
+    /// recorded object is identical to its <c>GET /api/v1/player</c> response.
+    ///
+    /// This is the only thing either project exposes the master deck through.
+    /// <see cref="CaptureState"/> carries the combat piles, and those hold the
+    /// per-combat copies a fight is dealt from - nothing in a game state says
+    /// what the run's deck is, so a recording without this cannot answer what
+    /// the player was building towards, which is most of what a run is.
+    ///
+    /// Returns null if the snapshot fails, or outside a run, where the builder
+    /// reports <c>in_run: false</c> and there is no deck to record; a step is
+    /// still recorded either way rather than dropping the action.
+    ///
+    /// Held inside <see cref="PassiveCapture"/> on the same terms as
+    /// <see cref="CaptureState"/>. Nothing it reads opens a screen today, but
+    /// the guard costs nothing and survives the next re-sync.
+    /// </summary>
+    internal static Dictionary<string, object?>? CapturePlayerDetail()
+    {
+        PassiveCapture.Enter();
+
+        try
+        {
+            var detail = STS2_MCP.McpMod.CapturePlayerDetail();
+            return detail.TryGetValue("in_run", out var inRun) && inRun is false ? null : detail;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Player detail capture failed; recording this step without it", ex);
+            return null;
+        }
+        finally
+        {
+            PassiveCapture.Exit();
+        }
+    }
 }

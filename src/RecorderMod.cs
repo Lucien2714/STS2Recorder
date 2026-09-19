@@ -167,7 +167,10 @@ public static class RecorderMod
         // built its history record on the way into this call, so the start time
         // is readable now. This is the last chance to name the file correctly.
         session.AdoptRunId(RunContext.GetHistoryStartTime());
-        session.Close(RunContext.CaptureState(), RunContext.GetOutcome(victory));
+        session.Close(
+            RunContext.CaptureState(),
+            RunContext.CapturePlayerDetail(),
+            RunContext.GetOutcome(victory));
 
         Log.Info($"Run {session.RunId} ended after {session.Trajectory.Steps.Count} step(s).");
         Session = null;
@@ -190,7 +193,7 @@ public static class RecorderMod
         // continued later. Writing one here would record the main menu as the
         // player's final state and invent an ending the run never had.
         session.AdoptRunId(RunContext.GetHistoryStartTime());
-        session.Close(finalState: null, outcome: null);
+        session.Close(finalState: null, finalPlayerDetail: null, outcome: null);
 
         Log.Info($"Run {session.RunId} left with {session.Trajectory.Steps.Count} step(s) " +
                  "and no outcome; continuing it will record to a new file with the same id.");
@@ -275,7 +278,10 @@ public static class RecorderMod
             var action = describe(state);
             if (action == null) return;
 
-            session.RecordStep(state, action);
+            // Only once the step is known to be worth keeping: the deck snapshot
+            // is the more expensive of the two reads, and a hook that passes on
+            // the action should not have paid for it.
+            session.RecordStep(state, RunContext.CapturePlayerDetail(), action);
             recorded = true;
         });
 
